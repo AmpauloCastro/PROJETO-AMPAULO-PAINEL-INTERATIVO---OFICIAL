@@ -1,0 +1,1147 @@
+import React, { useState, useEffect } from 'react';
+
+// Função auxiliar para formatar a data de YYYY-MM-DD para DD/MM/YYYY
+const formatDate = (dateString) => {
+  if (!dateString) return '';
+  const [year, month, day] = dateString.split('-');
+  return `${day}/${month}/${year}`;
+};
+
+// Função para obter as datas de início e fim de uma semana, começando no domingo (UTC-agnóstico)
+const getWeekRangeSundayStart = (dateString) => {
+  // Cria um objeto Date a partir da string da data, garantindo que seja tratado como meia-noite UTC.
+  // Isso ajuda a prevenir problemas de fuso horário que podem deslocar a data.
+  const d = new Date(dateString + 'T00:00:00Z');
+
+  // Obtém o dia da semana UTC (0 para Domingo, 1 para Segunda, ..., 6 para Sábado)
+  const dayOfWeek = d.getUTCDay();
+
+  // Calcula a data para o Domingo da semana atual
+  const sunday = new Date(d);
+  sunday.setUTCDate(d.getUTCDate() - dayOfWeek); // Ajusta para o Domingo da semana em UTC
+
+  // Calcula a data para o Sábado da semana atual
+  const saturday = new Date(sunday);
+  saturday.setUTCDate(sunday.getUTCDate() + 6); // Define para o Sábado da semana em UTC
+
+  // Função auxiliar para formatar objetos Date para a string YYYY-MM-DD
+  const formatIsoDate = (dateObj) => dateObj.toISOString().slice(0, 10);
+
+  return {
+    sunday: formatIsoDate(sunday),
+    saturday: formatIsoDate(saturday)
+  };
+};
+
+// Componente principal da aplicação
+const App = () => {
+  // Estado para os dados do usuário (dados de exemplo por enquanto)
+  const [userData, setUserData] = useState({
+    name: 'Polímata Normal',
+    level: 'Potencial para Ótimo',
+    totalRuns: 150,
+    totalDistance: 1250, // km
+    avgPace: '5:30 min/km',
+  });
+
+  // Dados das zonas de ritmo atualizados com Km/h
+  const paceZones = [
+    { zone: 'Z1 – Recuperação Ativa', paceMin: '07:31', paceMax: '08:30', kmhApprox: '7.1 – 8.0', description: 'Caminhada rápida ou trote suave' },
+    { zone: 'Z2 – Ritmo Leve', paceMin: '07:00', paceMax: '07:30', kmhApprox: '8.0 – 8.6', description: 'Conversa fácil, base regenerativa' },
+    { zone: 'Z3 – Ritmo Moderado', paceMin: '06:31', paceMax: '06:59', kmhApprox: '8.6 – 9.2', description: 'Levemente ofegante, treino aeróbico' },
+    { zone: 'Z4 – Ritmo Forte', paceMin: '06:00', paceMax: '06:30', kmhApprox: '9.2 – 10.0', description: 'Alta intensidade, melhora de velocidade' },
+    { zone: 'Z5 – Sprint / Máximo', paceMin: '05:00', paceMax: '05:59', kmhApprox: '10.0 – 12.0', description: 'Sprint curto, potência, técnica' },
+  ];
+
+  // Estado para os registros de treino com os novos dados detalhados
+  const [trainingLog, setTrainingLog] = useState([
+    // Dados de Julho de 2025
+    {
+      id: 1, date: '2025-07-14', distance: 6.4, time: '46:00', pace: '7:12', notes: 'Corrida Leve',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:45/km', zone: 'Z1', observations: 'Caminhada rápida / trote' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote leve e constante' },
+        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Concentração no ritmo' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Respiração tranquila' },
+        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Passada firme e natural' },
+        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Foco no conforto final' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Caminhada + trote leve (0.4 km)' },
+      ]
+    },
+    {
+      id: 2, date: '2025-07-16', distance: 7.6, time: '50:00', pace: '6:35', notes: 'Corrida Intervalada',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Soltar articulações' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
+        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Força e explosão' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação com respiração' },
+        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Frequência e constância' },
+        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização do esforço' },
+        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Finalização de estímulo' },
+        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote final' },
+      ]
+    },
+    {
+      id: 3, date: '2025-07-19', distance: 11.1, time: '73:00', pace: '6:34', notes: 'Corrida Longa',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Ritmo leve para aquecer' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Transição gradual' },
+        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Base sólida' },
+        { km: '4', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Mantendo fluidez' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Fase de recuperação ativa' },
+        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Retomando controle' },
+        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Leve aceleração' },
+        { km: '8', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Ajuste respiratório' },
+        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo forte final' },
+        { km: '10', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Manter até o final' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve (0.4 km)' },
+      ]
+    },
+    {
+      id: 4, date: '2025-07-21', distance: 6.4, time: '46:00', pace: '7:12', notes: 'Corrida Leve',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:45/km', zone: 'Z1', observations: 'Caminhada rápida / trote' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote leve e constante' },
+        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Concentração no ritmo' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Respiração tranquila' },
+        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Passada firme e natural' },
+        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Foco no conforto final' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Caminhada + trote leve (0.4 km)' },
+      ]
+    },
+    {
+      id: 5, date: '2025-07-23', distance: 7.6, time: '50:00', pace: '6:35', notes: 'Corrida Intervalada',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Soltar articulações' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
+        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Força e explosão' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação com respiração' },
+        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Frequência e constância' },
+        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização do esforço' },
+        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Finalização de estímulo' },
+        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote final' },
+      ]
+    },
+    {
+      id: 6, date: '2025-07-26', distance: 12.0, time: '77:00', pace: '6:25', notes: 'Corrida Longa',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Ritmo leve para aquecer' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Transição gradual' },
+        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Base sólida' },
+        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Mantendo fluidez' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Recuperação ativa' },
+        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Retomando controle' },
+        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Aceleração leve' },
+        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Ajuste respiratório' },
+        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo final' },
+        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Estabilização final' },
+        { km: '11', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Transição para desaquecimento' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve (1 km)' },
+      ]
+    },
+    {
+      id: 7, date: '2025-07-28', distance: 6.4, time: '46:00', pace: '7:12', notes: 'Corrida Leve',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:45/km', zone: 'Z1', observations: 'Caminhada rápida / trote' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote leve e constante' },
+        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Concentração no ritmo' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Respiração tranquila' },
+        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Passada firme e natural' },
+        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Foco no conforto final' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Caminhada + trote leve (0.4 km)' },
+      ]
+    },
+    {
+      id: 8, date: '2025-07-30', distance: 7.6, time: '50:00', pace: '6:35', notes: 'Corrida Intervalada',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Soltar articulações' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
+        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Força e explosão' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação com respiração' },
+        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Frequência e constância' },
+        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização do esforço' },
+        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Finalização de estímulo' },
+        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote final' },
+      ]
+    },
+    // Dados de Agosto de 2025
+    {
+      id: 9, date: '2025-08-02', distance: 11.8, time: '80:00', pace: '6:47', notes: 'Corrida Longa',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início suave e constante' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Ritmo tranquilo para adaptação' },
+        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Construção de base aeróbica' },
+        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Aceleração progressiva' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Recuperação' },
+        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Retomada de ritmo constante' },
+        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Manutenção do pace médio' },
+        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Transição para esforço final' },
+        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo final' },
+        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Consolidação do treino' },
+        { km: '11', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote' },
+        { km: '12', step: 'Final', pace: '—', zone: '—', observations: 'Respiração e hidratação' },
+      ]
+    },
+    {
+      id: 10, date: '2025-08-04', distance: 6.4, time: '46:00', pace: '7:12', notes: 'Corrida Leve',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:45/km', zone: 'Z1', observations: 'Caminhada rápida / trote' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote leve e constante' },
+        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Concentração no ritmo' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Respiração tranquila' },
+        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Passada firme e natural' },
+        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Foco no conforto final' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Caminhada + trote leve (0.4 km)' },
+      ]
+    },
+    {
+      id: 11, date: '2025-08-06', distance: 7.6, time: '50:00', pace: '6:35', notes: 'Corrida Intervalada',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Soltar articulações' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
+        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Força e explosão' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação com respiração' },
+        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Frequência e constância' },
+        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização do esforço' },
+        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Finalização de estímulo' },
+        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote final' },
+      ]
+    },
+    {
+      id: 12, date: '2025-08-09', distance: 12.3, time: '83:00', pace: '6:44', notes: 'Corrida Longa',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Ritmo leve para aquecer' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Transição gradual' },
+        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Base sólida' },
+        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Mantendo fluidez' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Recuperação ativa' },
+        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Retomando controle' },
+        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Aceleração leve' },
+        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Ajuste respiratório' },
+        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo final' },
+        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Manter o controle' },
+        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Transição para final' },
+        { km: '12', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve (1.3 km)' },
+      ]
+    },
+    {
+      id: 13, date: '2025-08-11', distance: 6.5, time: '46:00', pace: '7:04', notes: 'Corrida Leve',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Ritmo leve, respiração tranquila' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Passada natural' },
+        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Estabilização do corpo' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Soltura muscular' },
+        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Final com leve controle' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve (0.4 km)' },
+      ]
+    },
+    {
+      id: 14, date: '2025-08-13', distance: 7.8, time: '50:00', pace: '6:25', notes: 'Corrida Intervalada',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Leve corrida inicial' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Trote + caminhada' },
+        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Força e técnica' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação com trote' },
+        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Frequência ativa' },
+        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Soltura' },
+        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Aceleração controlada' },
+        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
+      ]
+    },
+    {
+      id: 15, date: '2025-08-16', distance: 13.0, time: '85:00', pace: '6:32', notes: 'Corrida Longa',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início suave' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Ajustando respiração' },
+        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Constância' },
+        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Estabilizando' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Recuperação leve' },
+        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Controle postural' },
+        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Aceleração leve' },
+        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Soltar musculatura' },
+        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Final com potência' },
+        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Resistência final' },
+        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Fase de transição' },
+        { km: '12', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + leve trote' },
+        { km: '13', step: 'Final', pace: '—', zone: '—', observations: 'Hidratação' },
+      ]
+    },
+    {
+      id: 16, date: '2025-08-18', distance: 6.5, time: '46:00', pace: '7:04', notes: 'Corrida Leve',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Ritmo leve, respiração tranquila' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Passada natural' },
+        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Estabilização do corpo' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Soltura muscular' },
+        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Final com leve controle' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve (0.4 km)' },
+      ]
+    },
+    {
+      id: 17, date: '2025-08-20', distance: 8.0, time: '50:00', pace: '6:15', notes: 'Corrida Intervalada',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Trote leve' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + respiração controlada' },
+        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Aceleração intensa' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação' },
+        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Explosão moderada' },
+        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização respiratória' },
+        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Finalização de estímulo' },
+        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote' },
+      ]
+    },
+    {
+      id: 18, date: '2025-08-23', distance: 13.5, time: '88:00', pace: '6:30', notes: 'Corrida Longa',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início estável' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Ajuste de respiração' },
+        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Consolidação de base' },
+        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Fluidez constante' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Transição leve' },
+        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Força estável' },
+        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Leve aceleração' },
+        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Soltar tensão' },
+        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo final' },
+        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Sustentação' },
+        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Transição para o fim' },
+        { km: '12', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
+        { km: '13', step: 'Final', pace: '—', zone: '—', observations: 'Reidratação e descanso' },
+      ]
+    },
+    {
+      id: 19, date: '2025-08-25', distance: 6.5, time: '46:00', pace: '7:04', notes: 'Corrida Leve',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início com leve trote' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Ritmo de recuperação' },
+        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Passada eficiente' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Respirando com conforto' },
+        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Foco na postura' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + respiração leve' },
+      ]
+    },
+    {
+      id: 20, date: '2025-08-27', distance: 7.5, time: '50:00', pace: '6:40', notes: 'Corrida Intervalada',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Trote progressivo' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada rápida' },
+        { km: '3', step: 'Sprint', pace: '5:15/km', zone: 'Z5', observations: '30s forte' },
+        { km: '4', step: 'Recuperação', pace: '7:15/km', zone: 'Z2', observations: '1m30 leve' },
+        { km: '5', step: 'Sprint', pace: '5:15/km', zone: 'Z5', observations: '30s forte' },
+        { km: '6', step: 'Recuperação', pace: '7:15/km', zone: 'Z2', observations: '1m30 leve' },
+        { km: '7', step: 'Sprint', pace: '5:15/km', zone: 'Z5', observations: '30s forte' },
+        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote' },
+      ]
+    },
+    {
+      id: 21, date: '2025-08-30', distance: 14.0, time: '90:00', pace: '6:25', notes: 'Corrida Longa',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início leve' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Foco na cadência' },
+        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Base estável' },
+        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Postura ativa' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Respiração equilibrada' },
+        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Controle de esforço' },
+        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Estabilização' },
+        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Recuperação ativa' },
+        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Força final' },
+        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Sustentação até o fim' },
+        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Relaxamento final' },
+        { km: '12', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
+        { km: '13', step: 'Final', pace: '—', zone: '—', observations: 'Reidratação + alongamento' },
+      ]
+    },
+    // Dados de Setembro de 2025
+    {
+      id: 22, date: '2025-09-01', distance: 6.6, time: '46:00', pace: '6:58',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início leve com passada solta' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Conversa fácil, respiração tranquila' },
+        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Postura ativa, passada firme' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação leve' },
+        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Estabilizar ritmo até o fim' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote (0.4 km)' },
+      ]
+    },
+    {
+      id: 23, date: '2025-09-03', distance: 8.0, time: '50:00', pace: '6:15', notes: 'Corrida Intervalada',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Trote leve' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada progressiva' },
+        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Sprint controlado' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação' },
+        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Força e foco na cadência' },
+        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização respiratória' },
+        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Sprint final' },
+        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
+      ]
+    },
+    {
+      id: 24, date: '2025-09-06', distance: 14.5, time: '92:00', pace: '6:20', notes: 'Corrida Longa',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Soltar articulações' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Respiração estável' },
+        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Ritmo base' },
+        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Progresso contínuo' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Reduzir carga' },
+        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Retomar controle' },
+        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Foco em cadência' },
+        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Leve transição' },
+        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo final' },
+        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Manutenção' },
+        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Transição' },
+        { km: '12', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Preparação para fim' },
+        { km: '13', step: 'Ritmo Const.', pace: '6:50/km', zone: 'Z3', observations: 'Estabilidade final' },
+        { km: '14', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote leve' },
+        { km: '15', step: 'Final', pace: '—', zone: '—', observations: 'Hidratação e alongamento' },
+      ]
+    },
+    {
+      id: 25, date: '2025-09-08', distance: 6.6, time: '46:00', pace: '6:58', notes: 'Corrida Leve',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote suave para relaxar' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Respiração nasal' },
+        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Atenção à postura' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Controle de passada' },
+        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Cadência constante' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
+      ]
+    },
+    {
+      id: 26, date: '2025-09-10', distance: 7.9, time: '50:00', pace: '6:19', notes: 'Corrida Intervalada',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:15/km', zone: 'Z2', observations: 'Aumentar temperatura corporal' },
+        { km: '2', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Explosão breve e controlada' },
+        { km: '3', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação respiratória' },
+        { km: '4', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Sprint curto com foco total' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Retomar estabilidade' },
+        { km: '6', step: 'Ritmo Forte', pace: '6:15/km', zone: 'Z4', observations: 'Último estímulo do dia' },
+        { km: '7', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote' },
+        { km: '8', step: 'Finalização', pace: '—', zone: '—', observations: 'Alongamento' },
+      ]
+    },
+    {
+      id: 27, date: '2025-09-13', distance: 15.0, time: '97:00', pace: '6:28', notes: 'Corrida Longa',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote leve' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Passada leve, natural' },
+        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Estabilizar' },
+        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Consistência' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Aliviar impacto' },
+        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Retomar cadência' },
+        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Estímulo médio' },
+        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Condução leve' },
+        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Aceleração consciente' },
+        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Fechar em consistência' },
+        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Respirar e manter' },
+        { km: '12', step: 'Ritmo Const.', pace: '6:55/km', zone: 'Z3', observations: 'Final com ritmo médio' },
+        { km: '13', step: 'Ritmo Const.', pace: '6:55/km', zone: 'Z3', observations: 'Resistência' },
+        { km: '14', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
+        { km: '15', step: 'Final', pace: '—', zone: '—', observations: 'Hidratação + alongamento' },
+      ]
+    },
+    {
+      id: 28, date: '2025-09-15', distance: 6.6, time: '46:00', pace: '6:58', notes: 'Corrida Leve',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote suave' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Ritmo estável e leve' },
+        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Foco em respiração' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Desacelerar sem perder ritmo' },
+        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Finalização' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
+      ]
+    },
+    {
+      id: 29, date: '2025-09-17', distance: 8.0, time: '50:00', pace: '6:15', notes: 'Corrida Intervalada',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Trote leve' },
+        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada progressiva' },
+        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Sprint controlado' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação' },
+        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Força e foco na cadência' },
+        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização respiratória' },
+        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Sprint final' },
+        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
+      ]
+    },
+    {
+      id: 30, date: '2025-09-20', distance: 15.0, time: '98:00', pace: '6:32', notes: 'Corrida Longa',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Ritmo leve' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Passada leve' },
+        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Base sólida' },
+        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Controle de passada' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Recuperação ativa' },
+        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Consistência' },
+        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Aceleração leve' },
+        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Transição respiratória' },
+        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo final' },
+        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Manter esforço' },
+        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Estabilização final' },
+        { km: '12', step: 'Ritmo Const.', pace: '6:55/km', zone: 'Z3', observations: 'Final técnico' },
+        { km: '13', step: 'Ritmo Const.', pace: '6:55/km', zone: 'Z3', observations: 'Resiliência' },
+        { km: '14', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
+        { km: '15', step: 'Final', pace: '—', zone: '—', observations: 'Hidratação e alongamento' },
+      ]
+    },
+    {
+      id: 31, date: '2025-09-22', distance: 6.6, time: '46:00', pace: '6:58', notes: 'Corrida Leve',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início leve com postura solta' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Foco na respiração nasal' },
+        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Atenção à pisada e passada firme' },
+        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilizar' },
+        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Foco e controle' },
+        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
+      ]
+    },
+    {
+      id: 32, date: '2025-09-24', distance: 7.9, time: '50:00', pace: '6:19', notes: 'Corrida Intervalada',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Trote suave' },
+        { km: '2', step: 'Ritmo Forte', pace: '6:15/km', zone: 'Z4', observations: 'Cadência e técnica' },
+        { km: '3', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação' },
+        { km: '4', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Aceleração curta' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Reduzir impacto' },
+        { km: '6', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Finalizar forte' },
+        { km: '7', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
+        { km: '8', step: 'Finalização', pace: '—', zone: '—', observations: 'Alongamento final' },
+      ]
+    },
+    {
+      id: 33, date: '2025-09-27', distance: 15.2, time: '102:00', pace: '6:43', notes: 'Corrida Longa',
+      detailedWorkout: [
+        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Passada leve' },
+        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Progresso leve' },
+        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Base sólida' },
+        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Estabilizar' },
+        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Recuperação ativa' },
+        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Ritmo firme' },
+        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Intensidade moderada' },
+        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Alívio muscular' },
+        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Força e superação' },
+        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Resistência' },
+        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Equilíbrio final' },
+        { km: '12', step: 'Ritmo Const.', pace: '6:55/km', zone: 'Z3', observations: 'Conclusão em técnica' },
+        { km: '13', step: 'Ritmo Const.', pace: '6:55/km', zone: 'Z3', observations: 'Controle respiratório' },
+        { km: '14', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
+        { km: '15', step: 'Final', pace: '—', zone: '—', observations: '' },
+      ]
+    },
+  ]);
+
+  // Feriados de Eunápolis-BA para 2025
+  const holidays = [
+    { date: '2025-01-01', name: 'Confraternização Universal' },
+    { date: '2025-03-03', name: 'Carnaval' },
+    { date: '2025-03-04', name: 'Carnaval' },
+    { date: '2025-03-05', name: 'Quarta-feira de Cinzas' },
+    { date: '2025-04-18', name: 'Sexta-feira da Paixão' },
+    { date: '2025-04-21', name: 'Dia de Tiradentes' },
+    { date: '2025-05-01', name: 'Dia do Trabalhador' },
+    { date: '2025-05-24', name: 'Nossa Senhora Auxiliadora (Municipal)' },
+    { date: '2025-06-19', name: 'Corpus Christi' },
+    { date: '2025-06-24', name: 'São João (Municipal)' },
+    { date: '2025-07-02', name: 'Independência da Bahia (Estadual)' },
+    { date: '2025-09-07', name: 'Independência do Brasil' },
+    { date: '2025-10-12', name: 'Dia de Nossa Senhora Aparecida' },
+    { date: '2025-11-02', name: 'Dia de Finados' },
+    { date: '2025-11-15', name: 'Proclamação da República do Brasil' },
+    { date: '2025-11-20', name: 'Dia Nacional de Zumbi e da Consciência Negra' },
+    { date: '2025-12-25', name: 'Natal' },
+  ];
+
+  // Estado para o formulário de nova entrada de registro
+  const [newLogEntry, setNewLogEntry] = useState({
+    date: '',
+    distance: '',
+    time: '',
+    pace: '',
+    notes: '',
+    detailedWorkout: [],
+  });
+
+  // Estado da UI para controlar abas e seções expandidas
+  const [activeTab, setActiveTab] = useState('mensal'); // 'trimestral', 'mensal', 'semanal'
+  const [activeMonth, setActiveMonth] = useState(null); // 'YYYY-MM'
+  const [activeWeek, setActiveWeek] = useState(null); // 'YYYY-MM-DD_YYYY-MM-DD'
+  const [expandedDay, setExpandedDay] = useState(null); // 'YYYY-MM-DD'
+
+  // Dados de foco trimestral e mensal
+  const quarterlyFocus = {
+    '2025-Q1': {
+      title: 'Primeiro Trimestre de 2025: Fundação e Adaptação',
+      description: 'Foco na construção de uma base sólida de corrida, adaptando o corpo a diferentes ritmos e distâncias. Período de exploração e ajuste de zonas de pace.',
+      months: [
+        { name: 'Janeiro', focus: 'Início do ano, foco na consistência e adaptação.' },
+        { name: 'Fevereiro', focus: 'Introdução gradual de treinos mais longos e intervalados.' },
+        { name: 'Março', focus: 'Consolidação da base aeróbica e preparação para aumentos de volume.' },
+      ],
+    },
+    '2025-Q2': {
+      title: 'Segundo Trimestre de 2025: Aumento de Volume e Intensidade',
+      description: 'Este trimestre visa aumentar o volume semanal e a intensidade dos treinos, com foco em melhorar a resistência e a velocidade em diferentes zonas de esforço.',
+      months: [
+        { name: 'Abril', focus: 'Aumento progressivo da distância nos longões e introdução de treinos de ritmo.' },
+        { name: 'Maio', focus: 'Foco na manutenção do pace em distâncias moderadas e aprimoramento da técnica.' },
+        { name: 'Junho', focus: 'Preparação para o aumento significativo de volume no próximo trimestre.' },
+      ],
+    },
+    '2025-Q3': {
+      title: 'Terceiro Trimestre de 2025: Rumo à Excelência na Resistência',
+      description: 'Foco na consolidação de longões e aumento progressivo da distância, preparando o corpo para desafios maiores e aprimorando a capacidade aeróbica.',
+      months: [
+        { name: 'Julho', focus: 'Consolidar 12 km no longão' },
+        { name: 'Agosto', focus: 'Estabilizar 12 km no longão e preparar para 13 km' },
+        { name: 'Setembro', focus: 'Subir para 14–15 km no longão' },
+      ],
+    },
+    '2025-Q4': {
+      title: 'Quarto Trimestre de 2025: Pico de Performance e Desafios Finais',
+      description: 'Período de lapidação da performance, com foco em treinos de alta intensidade e simulações de prova. Preparação para atingir o pico e superar metas.',
+      months: [
+        { name: 'Outubro', focus: 'Preparação para distâncias maiores e foco em treinos de velocidade.' },
+        { name: 'Novembro', focus: 'Manutenção da forma física e recuperação ativa.' },
+        { name: 'Dezembro', focus: 'Revisão do ano e planejamento para a próxima temporada de treinos.' },
+      ],
+    },
+  };
+
+  // Função para lidar com mudanças nos inputs do novo registro
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setNewLogEntry({ ...newLogEntry, [name]: value });
+  };
+
+  // Função para adicionar uma nova entrada de registro
+  const addLogEntry = (e) => {
+    e.preventDefault();
+    if (newLogEntry.date && newLogEntry.distance && newLogEntry.time) {
+      const id = trainingLog.length > 0 ? Math.max(...trainingLog.map(log => log.id)) + 1 : 1;
+      setTrainingLog([...trainingLog, { ...newLogEntry, id, detailedWorkout: [] }]);
+      setNewLogEntry({ date: '', distance: '', time: '', pace: '', notes: '', detailedWorkout: [] }); // Limpar formulário
+    } else {
+      console.error("Por favor, preencha todos os campos obrigatórios.");
+    }
+  };
+
+  // Agrupa o registro de treino APENAS por mês (YYYY-MM).
+  // Isso garante que cada treino esteja estritamente sob seu mês de calendário.
+  const groupedTrainingLogByMonth = {};
+
+  trainingLog.forEach(entry => {
+    const entryYearMonth = entry.date.substring(0, 7); // 'YYYY-MM'
+    
+    // Cria um objeto Date a partir da chave do mês para obter o nome do mês corretamente.
+    // Usamos Date.UTC para evitar problemas de fuso horário.
+    const [year, monthNum] = entryYearMonth.split('-');
+    const monthDateForDisplay = new Date(Date.UTC(year, monthNum - 1, 1));
+    const monthDisplayName = monthDateForDisplay.toLocaleString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+    if (!groupedTrainingLogByMonth[entryYearMonth]) {
+      groupedTrainingLogByMonth[entryYearMonth] = {
+        displayName: monthDisplayName,
+        entries: []
+      };
+    }
+    groupedTrainingLogByMonth[entryYearMonth].entries.push(entry);
+  });
+
+  // Dados das dicas de corrida
+  const runningTips = [
+    "Comece devagar e aumente a distância gradualmente.",
+    "Mantenha uma boa postura: ombros relaxados, olhar para frente.",
+    "Invista em tênis adequados para o seu tipo de pisada.",
+    "Faça alongamento antes e depois da corrida.",
+    "Mantenha-se hidratado, beba água antes, durante e depois.",
+    "Varie seus treinos: inclua ritmo, fartlek e longões.",
+    "Escute seu corpo e descanse quando necessário.",
+    "Considere treinar com um parceiro ou grupo.",
+    "Defina metas realistas e celebre suas conquistas.",
+    "Alimente-se bem para ter energia e se recuperar.",
+  ];
+
+  // Placeholder para configuração do Firebase (se a persistência for necessária mais tarde)
+  useEffect(() => {
+    // Aqui é onde a inicialização e autenticação do Firebase iriam
+    // Por enquanto, é um placeholder.
+    // const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    // const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    // if (Object.keys(firebaseConfig).length > 0) {
+    //   const app = initializeApp(firebaseConfig);
+    //   const auth = getAuth(app);
+    //   const db = getFirestore(app);
+
+    //   const signIn = async () => {
+    //     try {
+    //       if (typeof __initial_auth_token !== 'undefined') {
+    //         await signInWithCustomToken(auth, __initial_auth_token);
+    //       } else {
+    //         await signInAnonymously(auth);
+    //       }
+    //       const userId = auth.currentUser?.uid || crypto.randomUUID();
+    //       console.log("Firebase initialized and user signed in:", userId);
+    //       // Aqui você configuraria os listeners do Firestore para dados do usuário e registro de treino
+    //     } catch (error) {
+    //       console.error("Erro ao inicializar Firebase ou autenticar:", error);
+    //     }
+    //   };
+    //   signIn();
+    // }
+  }, []); // Array de dependência vazio significa que isso é executado uma vez na montagem
+
+  return (
+    <div className="min-h-screen bg-[#00BFA6] font-sans text-[#212121] p-4 sm:p-6 lg:p-8 rounded-lg shadow-lg">
+      {/* Cabeçalho do Painel */}
+      <header className="mb-8 text-center">
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-white drop-shadow-lg rounded-lg p-4 bg-[#212121] bg-opacity-80">
+          O GUIA COMPLETO PARA CORREDORES
+        </h1>
+        <p className="text-xl sm:text-2xl text-white mt-2">Edição Projeto Ampaulo</p>
+      </header>
+
+      {/* Grade de Conteúdo Principal */}
+      <main className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Perfil do Usuário e Estatísticas - Coluna Esquerda */}
+        <section className="lg:col-span-1 bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
+          <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
+            <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"></path></svg>
+            Seu Perfil
+          </h2>
+          <div className="space-y-3 text-lg">
+            <p><span className="font-semibold">Nome:</span> {userData.name}</p>
+            <p><span className="font-semibold">Nível:</span> {userData.level}</p>
+            <p><span className="font-semibold">Corridas Totais:</span> {userData.totalRuns}</p>
+            <p><span className="font-semibold">Distância Total:</span> {userData.totalDistance} km</p>
+            <p><span className="font-semibold">Ritmo Médio:</span> {userData.avgPace}</p>
+          </div>
+          <button className="mt-6 w-full bg-[#FF6B6B] hover:bg-[#FFA726] text-white font-bold py-3 px-4 rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105">
+            Editar Perfil
+          </button>
+        </section>
+
+        {/* Conteúdo Principal com Abas - Colunas do Meio e Direita */}
+        <div className="lg:col-span-2 grid grid-cols-1 gap-6">
+          {/* Navegação por Abas */}
+          <div className="flex justify-center mb-4 space-x-2">
+            <button
+              className={`py-2 px-4 rounded-lg font-bold transition duration-300 ease-in-out ${
+                activeTab === 'trimestral'
+                  ? 'bg-[#FF6B6B] text-white shadow-lg'
+                  : 'bg-white text-[#212121] hover:bg-gray-100'
+              }`}
+              onClick={() => setActiveTab('trimestral')}
+            >
+              Trimestral
+            </button>
+            <button
+              className={`py-2 px-4 rounded-lg font-bold transition duration-300 ease-in-out ${
+                activeTab === 'mensal'
+                  ? 'bg-[#FF6B6B] text-white shadow-lg'
+                  : 'bg-white text-[#212121] hover:bg-gray-100'
+              }`}
+              onClick={() => setActiveTab('mensal')}
+            >
+              Mensal
+            </button>
+            <button
+              className={`py-2 px-4 rounded-lg font-bold transition duration-300 ease-in-out ${
+                activeTab === 'semanal'
+                  ? 'bg-[#FF6B6B] text-white shadow-lg'
+                  : 'bg-white text-[#212121] hover:bg-gray-100'
+              }`}
+              onClick={() => setActiveTab('semanal')}
+            >
+              Semanal
+            </button>
+          </div>
+
+          {/* Conteúdo da Aba Trimestral */}
+          {activeTab === 'trimestral' && (
+            <section className="bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
+              <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
+                <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M3 6a3 3 0 013-3h10a2 2 0 012 2v8a2 2 0 01-2 2H6a3 3 0 01-3-3V6zm4 0a1 1 0 011 1v3a1 1 0 11-2 0V7a1 1 0 011-1zm6 0a1 1 0 011 1v3a1 1 0 11-2 0V7a1 1 0 011-1z" clipRule="evenodd"></path></svg>
+                Visão Trimestral
+              </h2>
+              {Object.keys(quarterlyFocus).sort().map(quarterKey => (
+                <div key={quarterKey} className="mb-4 p-4 bg-[#00BFA6] bg-opacity-10 rounded-lg border border-[#00BFA6] shadow-sm">
+                  <h3 className="text-xl font-bold text-[#212121] mb-2">{quarterlyFocus[quarterKey].title}</h3>
+                  <p className="text-lg mb-3">{quarterlyFocus[quarterKey].description}</p>
+                  <ul className="list-disc list-inside space-y-1">
+                    {quarterlyFocus[quarterKey].months.map((month, index) => (
+                      <li key={index} className="text-lg">
+                        <span className="font-semibold">{month.name}:</span> {month.focus}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </section>
+          )}
+
+          {/* Conteúdo da Aba Mensal (Histórico de Treinos) */}
+          {activeTab === 'mensal' && (
+            <section className="bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
+              <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
+                <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"></path></svg>
+                Histórico de Treinos Mensal
+              </h2>
+              {/* Ordena os meses do mais recente para o mais antigo */}
+              {Object.keys(groupedTrainingLogByMonth).sort((a,b) => new Date(b) - new Date(a)).map(monthKey => {
+                const monthData = groupedTrainingLogByMonth[monthKey];
+                const monthName = monthData.displayName.toUpperCase(); // NOME DO MÊS EM MAIÚSCULAS
+                const entriesForThisMonth = monthData.entries;
+
+                // Filtra os feriados que pertencem a este mês
+                const monthHolidays = holidays.filter(h => h.date.startsWith(monthKey));
+                
+                // Agrupa os treinos do mês atual por semana para exibição
+                const weeksInMonth = {};
+                entriesForThisMonth.forEach(entry => {
+                  const { sunday, saturday } = getWeekRangeSundayStart(entry.date);
+                  const weekKey = `${sunday}_${saturday}`;
+                  if (!weeksInMonth[weekKey]) {
+                    weeksInMonth[weekKey] = [];
+                  }
+                  weeksInMonth[weekKey].push(entry);
+                });
+
+                return (
+                  <div key={monthKey} className="mb-4">
+                    <button
+                      onClick={() => setActiveMonth(activeMonth === monthKey ? null : monthKey)}
+                      className="w-full text-left bg-[#00BFA6] bg-opacity-30 hover:bg-[#00BFA6] hover:bg-opacity-50 text-[#212121] font-bold py-3 px-4 rounded-lg shadow-md transition duration-200 ease-in-out flex justify-between items-center"
+                    >
+                      <span>{monthName}</span>
+                      <svg className={`w-5 h-5 transition-transform ${activeMonth === monthKey ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"></path></svg>
+                    </button>
+                    {activeMonth === monthKey && (
+                      <div className="mt-2 ml-4 border-l-2 border-[#00BFA6] pl-4">
+                        {/* Exibir Feriados do Mês */}
+                        {monthHolidays.length > 0 && (
+                          <div className="mb-4 p-3 bg-red-100 rounded-md border border-red-300 text-red-800">
+                            <h4 className="font-semibold mb-2">FERIADOS EM {monthName.split(' ')[0]}:</h4>
+                            <ul className="list-disc list-inside">
+                              {monthHolidays.map((holiday, hIdx) => (
+                                <li key={hIdx}>{formatDate(holiday.date)} - {holiday.name}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* Ordena as semanas do mais recente para o mais antigo */}
+                        {Object.keys(weeksInMonth).sort((a,b) => new Date(b.split('_')[0]) - new Date(a.split('_')[0])).map(weekKey => {
+                          const [sundayStr, saturdayStr] = weekKey.split('_');
+                          const weekEntries = weeksInMonth[weekKey];
+
+                          return (
+                            <div key={weekKey} className="mb-2">
+                              <button
+                                onClick={() => setActiveWeek(activeWeek === weekKey ? null : weekKey)}
+                                className="w-full text-left bg-[#C6FF00] bg-opacity-20 hover:bg-[#C6FF00] hover:bg-opacity-40 text-[#212121] font-semibold py-2 px-3 rounded-md transition duration-200 ease-in-out flex justify-between items-center"
+                              >
+                                <span>SEMANA: {formatDate(sundayStr)} - {formatDate(saturdayStr)}</span>
+                                <svg className={`w-5 h-5 transition-transform ${activeWeek === weekKey ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"></path></svg>
+                              </button>
+                              {activeWeek === weekKey && (
+                                <div className="mt-1 ml-4 border-l-2 border-[#C6FF00] pl-4">
+                                  {/* Ordena os treinos do mais antigo para o mais recente */}
+                                  {weekEntries.sort((a,b) => new Date(a.date) - new Date(b.date)).map(entry => (
+                                    <div key={entry.id} className="mb-1">
+                                      <button
+                                        onClick={() => setExpandedDay(expandedDay === entry.date ? null : entry.date)}
+                                        className="w-full text-left bg-white hover:bg-gray-100 text-[#212121] py-2 px-3 rounded-md transition duration-200 ease-in-out flex justify-between items-center"
+                                      >
+                                        <span>{formatDate(entry.date)} - {entry.distance} km ({entry.time})</span>
+                                        <svg className={`w-5 h-5 transition-transform ${expandedDay === entry.date ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"></path></svg>
+                                      </button>
+                                      {expandedDay === entry.date && (
+                                        <div className="mt-1 ml-4 p-3 bg-white rounded-md border border-gray-200 text-[#212121]">
+                                          <p className="mb-2"><span className="font-medium">Notas:</span> {entry.notes}</p>
+                                          {entry.detailedWorkout && entry.detailedWorkout.length > 0 && (
+                                            <div className="overflow-x-auto mt-2">
+                                              <table className="min-w-full bg-white rounded-lg shadow-sm">
+                                                <thead>
+                                                  <tr className="bg-[#C6FF00] bg-opacity-20 text-[#212121] uppercase text-xs leading-normal">
+                                                    <th className="py-2 px-4 text-left">Km</th>
+                                                    <th className="py-2 px-4 text-left">Etapa</th>
+                                                    <th className="py-2 px-4 text-left">Pace</th>
+                                                    <th className="py-2 px-4 text-left">Zona</th>
+                                                    <th className="py-2 px-4 text-left">Observações</th>
+                                                  </tr>
+                                                </thead>
+                                                <tbody className="text-[#212121] text-sm font-light">
+                                                  {entry.detailedWorkout.map((detail, idx) => (
+                                                    <tr key={idx} className="border-b border-gray-200 hover:bg-gray-50">
+                                                      <td className="py-2 px-4 whitespace-nowrap">{detail.km}</td>
+                                                      <td className="py-2 px-4 whitespace-nowrap">{detail.step}</td>
+                                                      <td className="py-2 px-4 whitespace-nowrap">{detail.pace}</td>
+                                                      <td className="py-2 px-4 whitespace-nowrap">{detail.zone}</td>
+                                                      <td className="py-2 px-4">{detail.observations}</td>
+                                                    </tr>
+                                                  ))}
+                                                </tbody>
+                                              </table>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </section>
+          )}
+
+          {/* Conteúdo da Aba Semanal (Treino da Semana Atual) */}
+          {activeTab === 'semanal' && (
+            <section className="bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
+              <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
+                <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"></path><path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 000-2H7zm3 0a1 1 0 000 2h.01a1 1 0 000-2H10zm3 0a1 1 0 000 2h.01a1 1 0 000-2H13zm-3 4a1 1 0 000 2h.01a1 1 0 000-2H10zm3 0a1 1 0 000 2h.01a1 1 0 000-2H13z" clipRule="evenodd"></path></svg>
+                Treino da Semana
+              </h2>
+              {/* Dropdowns para selecionar Mês e Semana */}
+              <div className="flex flex-col sm:flex-row gap-4 mb-4">
+                <select
+                  className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00] flex-grow"
+                  onChange={(e) => {
+                    setActiveMonth(e.target.value);
+                    setActiveWeek(null); // Reseta a semana quando o mês muda
+                    setExpandedDay(null); // Reseta o dia quando o mês muda
+                  }}
+                  value={activeMonth || ''}
+                >
+                  <option value="">SELECIONE UM MÊS</option>
+                  {/* Usa groupedTrainingLogByMonth para as chaves dos meses */}
+                  {Object.keys(groupedTrainingLogByMonth).sort((a,b) => new Date(b) - new Date(a)).map(monthKey => (
+                    <option key={monthKey} value={monthKey}>
+                      {groupedTrainingLogByMonth[monthKey].displayName.toUpperCase()} {/* NOME DO MÊS EM MAIÚSCULAS */}
+                    </option>
+                  ))}
+                </select>
+
+                {activeMonth && (
+                  <select
+                    className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00] flex-grow"
+                    onChange={(e) => {
+                      setActiveWeek(e.target.value);
+                      setExpandedDay(null); // Reseta o dia quando a semana muda
+                    }}
+                    value={activeWeek || ''}
+                  >
+                    <option value="">SELECIONE UMA SEMANA</option>
+                    {/* Gera chaves de semana com base nas entradas do mês ativo */}
+                    {(() => {
+                      const weeksInSelectedMonth = {};
+                      if (groupedTrainingLogByMonth[activeMonth]) {
+                        groupedTrainingLogByMonth[activeMonth].entries.forEach(entry => {
+                          const { sunday, saturday } = getWeekRangeSundayStart(entry.date);
+                          const weekKey = `${sunday}_${saturday}`;
+                          weeksInSelectedMonth[weekKey] = true; // Usa uma estrutura tipo set para chaves únicas
+                        });
+                      }
+                      return Object.keys(weeksInSelectedMonth).sort((a,b) => new Date(b.split('_')[0]) - new Date(a.split('_')[0])).map(weekKey => {
+                        const [sundayStr, saturdayStr] = weekKey.split('_');
+                        return (
+                          <option key={weekKey} value={weekKey}>
+                            {formatDate(sundayStr)} - {formatDate(saturdayStr)}
+                          </option>
+                        );
+                      });
+                    })()}
+                  </select>
+                )}
+              </div>
+
+              {activeMonth && activeWeek ? (
+                <ul className="space-y-3">
+                  {groupedTrainingLogByMonth[activeMonth].entries
+                    .filter(entry => {
+                      const { sunday, saturday } = getWeekRangeSundayStart(entry.date);
+                      return `${sunday}_${saturday}` === activeWeek;
+                    })
+                    .sort((a,b) => new Date(a.date) - new Date(b.date))
+                    .map(entry => (
+                      <li key={entry.id} className="bg-[#00BFA6] bg-opacity-10 p-4 rounded-lg border border-[#00BFA6] shadow-sm">
+                        <button
+                          onClick={() => setExpandedDay(expandedDay === entry.date ? null : entry.date)}
+                          className="w-full text-left font-semibold text-lg text-[#212121] flex justify-between items-center"
+                        >
+                          <span>{formatDate(entry.date)} - {entry.distance} km ({entry.time})</span>
+                          <svg className={`w-5 h-5 transition-transform ${expandedDay === entry.date ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"></path></svg>
+                        </button>
+                        {expandedDay === entry.date && (
+                          <div className="mt-3 text-[#212121]">
+                            <p className="mb-2"><span className="font-medium">Notas:</span> {entry.notes}</p>
+                            {entry.detailedWorkout && entry.detailedWorkout.length > 0 && (
+                              <div className="overflow-x-auto mt-2">
+                                <table className="min-w-full bg-white rounded-lg shadow-sm">
+                                  <thead>
+                                    <tr className="bg-[#C6FF00] bg-opacity-20 text-[#212121] uppercase text-xs leading-normal">
+                                      <th className="py-2 px-4 text-left">Km</th>
+                                      <th className="py-2 px-4 text-left">Etapa</th>
+                                      <th className="py-2 px-4 text-left">Pace</th>
+                                      <th className="py-2 px-4 text-left">Zona</th>
+                                      <th className="py-2 px-4 text-left">Observações</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="text-[#212121] text-sm font-light">
+                                    {entry.detailedWorkout.map((detail, idx) => (
+                                      <tr key={idx} className="border-b border-gray-200 hover:bg-gray-50">
+                                        <td className="py-2 px-4 whitespace-nowrap">{detail.km}</td>
+                                        <td className="py-2 px-4 whitespace-nowrap">{detail.step}</td>
+                                        <td className="py-2 px-4 whitespace-nowrap">{detail.pace}</td>
+                                        <td className="py-2 px-4 whitespace-nowrap">{detail.zone}</td>
+                                        <td className="py-2 px-4">{detail.observations}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="text-gray-600">Selecione um mês e uma semana para ver os treinos.</p>
+              )}
+            </section>
+          )}
+
+          {/* Formulário para Adicionar Novo Treino (Visível em todas as abas, ou pode ser movido) */}
+          <section className="bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
+            <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
+              <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"></path><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd"></path></svg>
+              Adicionar Novo Treino
+            </h2>
+            <form onSubmit={addLogEntry} className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 p-4 bg-[#00BFA6] bg-opacity-10 rounded-lg border border-[#00BFA6]">
+              <input
+                type="date"
+                name="date"
+                value={newLogEntry.date}
+                onChange={handleInputChange}
+                className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00]"
+                placeholder="Data"
+                required
+              />
+              <input
+                type="number"
+                name="distance"
+                value={newLogEntry.distance}
+                onChange={handleInputChange}
+                className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00]"
+                placeholder="Distância (km)"
+                step="0.1"
+                required
+              />
+              <input
+                type="text"
+                name="time"
+                value={newLogEntry.time}
+                onChange={handleInputChange}
+                className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00]"
+                placeholder="Tempo (ex: 30:00)"
+                required
+              />
+              <input
+                type="text"
+                name="pace"
+                value={newLogEntry.pace}
+                onChange={handleInputChange}
+                className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00]"
+                placeholder="Ritmo (ex: 5:30)"
+              />
+              <textarea
+                name="notes"
+                value={newLogEntry.notes}
+                onChange={handleInputChange}
+                className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00] col-span-full"
+                placeholder="Notas do treino..."
+                rows="2"
+              ></textarea>
+              <button
+                type="submit"
+                className="col-span-full bg-[#FF6B6B] hover:bg-[#FFA726] text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105"
+              >
+                Adicionar Treino
+              </button>
+            </form>
+          </section>
+
+          {/* Seção de Zonas de Ritmo */}
+          <section className="bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
+            <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
+              <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M3 6a3 3 0 013-3h10a2 2 0 012 2v8a2 2 0 01-2 2H6a3 3 0 01-3-3V6zm4 0a1 1 0 011 1v3a1 1 0 11-2 0V7a1 1 0 011-1zm6 0a1 1 0 011 1v3a1 1 0 11-2 0V7a1 1 0 011-1z" clipRule="evenodd"></path></svg>
+              Definições de Ritmo de Corrida (Pace Zones)
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full bg-white rounded-lg shadow-sm">
+                <thead>
+                  <tr className="bg-[#00BFA6] text-white uppercase text-sm leading-normal">
+                    <th className="py-3 px-6 text-left">Zona</th>
+                    <th className="py-3 px-6 text-left">Pace Min/Km</th>
+                    <th className="py-3 px-6 text-left">Pace Max/Km</th>
+                    <th className="py-3 px-6 text-left">Km/h (aprox.)</th>
+                    <th className="py-3 px-6 text-left">Descrição</th>
+                  </tr>
+                </thead>
+                <tbody className="text-[#212121] text-sm font-light">
+                  {paceZones.map((zone, index) => (
+                    <tr key={index} className="border-b border-gray-200 hover:bg-gray-100">
+                      <td className="py-3 px-6 text-left whitespace-nowrap">{zone.zone}</td>
+                      <td className="py-3 px-6 text-left">{zone.paceMin}</td>
+                      <td className="py-3 px-6 text-left">{zone.paceMax}</td>
+                      <td className="py-3 px-6 text-left">{zone.kmhApprox}</td>
+                      <td className="py-3 px-6 text-left">{zone.description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* Acompanhamento de Progresso (Placeholder para Gráfico) */}
+          <section className="bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
+            <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
+              <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"></path><path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"></path></svg>
+              Acompanhamento de Progresso
+            </h2>
+            <div className="bg-gray-50 p-4 rounded-lg text-center text-gray-600 h-48 flex items-center justify-center">
+              <p>Gráfico de progresso (distância, ritmo, etc.) será exibido aqui.</p>
+              {/* Futura integração com uma biblioteca de gráficos como Recharts */}
+            </div>
+          </section>
+        </div>
+      </main>
+
+      {/* Dicas para Corredores - Seção Inferior */}
+      <section className="mt-6 bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
+        <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
+          <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-6a1 1 0 00-.894.553L7.382 10H4a1 1 0 000 2h3.382l-1.498 3.447A1 1 0 007 16h6a1 1 0 00.894-.553L12.618 10H16a1 1 0 000-2h-3.382l1.498-3.447A1 1 0 0013 4H7z" clipRule="evenodd"></path></svg>
+          Dicas para Corredores
+        </h2>
+        <ul className="list-disc list-inside space-y-2 text-lg text-[#212121]">
+          {runningTips.map((tip, index) => (
+            <li key={index}>{tip}</li>
+          ))}
+        </ul>
+      </section>
+
+      {/* Rodapé */}
+      <footer className="mt-8 text-center text-[#212121] text-sm">
+        <p>&copy; 2025 O Guia Completo para Corredores. Todos os direitos reservados.</p>
+      </footer>
+    </div>
+  );
+};
+
+export default App;
