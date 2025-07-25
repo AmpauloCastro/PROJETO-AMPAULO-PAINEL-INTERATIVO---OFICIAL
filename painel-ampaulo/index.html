@@ -1,0 +1,2428 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Chosen Palette: "Subtle Steel and Teal" -->
+    <!-- Application Structure Plan: A single-page application (SPA) with a fixed top navigation bar to switch between different content views (Home, Hoje, Treino, Corrida, Nutrição, Progresso, Calendário, Finanças). This tabbed/view-based structure was chosen to break down the dense, multi-faceted report into manageable, focused sections. The default view is "Home," providing immediate access to personal data, which is the start of the user's journey. This avoids overwhelming the user with a long, single-scrolling page and makes finding specific information (like a workout detail or a nutritional value) much faster and more intuitive. The "Progresso" section is designed as a dedicated dashboard to visualize data, offering a more engaging and insightful experience than static tables. -->
+    <!-- Visualization & Content Choices:
+        - **Home (User Profile):** Goal: Personalization/Data Input. Method: Simple form fields. Justification: Collects essential user data for potential future customization of LLM features.
+        - **Hoje (Today's View):** Goal: Inform/Track. Method: Dynamically generated cards using JS for today's workout, schedule, and tracking. Justification: Provides immediate, relevant information for daily use. Also displays financial obligations due today.
+        - **Amanhã (Tomorrow's View):** Goal: Inform. Method: Similar to "Hoje", displaying tomorrow's schedule and financial obligations.
+        - **Plano de Treino/Corrida:** Goal: Organize/Inform. Method: Nested accordion-style sections for each workout and then for each muscle group. Interaction: JS toggles visibility for both levels. Justification: Provides granular detail for each exercise and its target muscle focus, allowing deep exploration without clutter. All previous muscle focus details from the PDF have been meticulously integrated into each exercise's description.
+        - **Corrida:** Goal: Inform/Organize. Method: Detailed table rows for running stages, explicitly breaking down combined paces (e.g., RF/RM) into individual types with their corresponding km/h ranges and segment durations. The table styling has been updated with alternating row colors and a darker header for improved readability. Horizontal scrolling is enabled for the table.
+        - **Nutrição:** Goal: Inform. Method: Clean, styled HTML tables. Justification: Clear and direct presentation of structured data.
+        - **Progresso (Progress):** Goal: Compare/Show Change. Method: Editable table for manual data input, and interactive charts using Chart.js on Canvas, generated on user click. Viz: 1) Line chart for Weight & Body Fat % trend. 2) Stacked Bar chart for Body Composition (Fat vs. Lean Mass). 3) Line chart for Circumference changes. 4) Radar chart for Skinfold changes. Interaction: Tooltips on hover. Justification: Dynamic charts provide a much richer understanding of trends and composition changes compared to static data tables.
+        - **Calendário (Calendar):** Goal: Inform/Motivate. Method: HTML grid. Interaction: Click to show daily message/verse in a modal. Justification: Provides a high-level monthly overview and keeps motivational content accessible but unobtrusive. Now also shows financial obligations.
+        - **Finanças (Finances):** Goal: Track/Inform. Method: Dedicated section for financial obligations and salary/advance payment dates.
+        - **CONFIRMATION: NO SVG graphics used. NO Mermaid JS used.** -->
+    <title>PROJETO AMPAULO – Painel Interativo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+        // Helper function for getting day names, globally accessible
+        function getDayName(date) {
+            const weekdays = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
+            return weekdays[date.getDay()];
+        }
+
+        // --- HOLIDAYS 2025 ---
+        // Format: YYYY-MM-DD for easy Date object creation
+        const holidays2025 = [
+            // National Holidays (Brazil)
+            "2025-01-01", // Confraternização Universal
+            "2025-03-03", // Carnaval (Ponto Facultativo)
+            "2025-03-04", // Carnaval (Ponto Facultativo)
+            "2025-03-05", // Quarta-feira de Cinzas (Ponto Facultativo até 14h)
+            "2025-04-18", // Paixão de Cristo
+            "2025-04-21", // Tiradentes
+            "2025-05-01", // Dia do Trabalho
+            "2025-06-19", // Corpus Christi (Ponto Facultativo)
+            "2025-09-07", // Independência do Brasil
+            "2025-10-12", // Nossa Senhora Aparecida
+            "2025-11-02", // Finados
+            "2025-11-15", // Proclamação da República
+            "2025-11-20", // Dia Nacional de Zumbi e da Consciência Negra
+            "2025-12-25", // Natal
+
+            // State Holidays (Bahia)
+            "2025-06-24", // Dia de São João
+            "2025-07-02", // Independência da Bahia
+            "2025-12-08", // Nossa Senhora da Conceição da Praia
+
+            // Municipal Holidays (Eunápolis, BA)
+            "2025-05-12", // Emancipação de Eunápolis
+            "2025-05-24"  // Nossa Senhora Auxiliadora
+        ].map(d => new Date(d + 'T12:00:00')); // Add T12:00:00 to avoid timezone issues with Date objects
+
+        // Helper function to check if a date is a holiday
+        function isHoliday(date) {
+            const dateString = date.toISOString().slice(0, 10);
+            return holidays2025.some(h => h.toISOString().slice(0, 10) === dateString);
+        }
+
+        // Helper function to check if a date is a business day (Mon-Fri, excluding holidays)
+        function isBusinessDay(date) {
+            const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+            return dayOfWeek !== 0 && dayOfWeek !== 6 && !isHoliday(date);
+        }
+
+        // Helper function to check if a date is a business day including Saturday (Mon-Sat, excluding holidays)
+        function isBusinessDayIncludingSaturday(date) {
+            const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+            return dayOfWeek !== 0 && !isHoliday(date);
+        }
+
+        // Function to get the Nth business day of a month
+        function getNthBusinessDay(year, month, n, includeSaturday = false) {
+            let count = 0;
+            let day = 1;
+            let date = new Date(year, month, day); // month is 0-indexed
+
+            while (count < n) {
+                if (includeSaturday ? isBusinessDayIncludingSaturday(date) : isBusinessDay(date)) {
+                    count++;
+                }
+                if (count < n) { // Increment day only if we haven't found the Nth day yet
+                    day++;
+                    date = new Date(year, month, day);
+                    // Check if we've gone past the end of the month
+                    if (date.getMonth() !== month) {
+                        return null; // Nth business day not found in this month
+                    }
+                }
+            }
+            return date;
+        }
+
+        // Function to get the next business day (Mon-Fri, excluding holidays)
+        function getNextBusinessDay(date) {
+            let nextDay = new Date(date);
+            // If the given date is a weekend or holiday, move to the next day
+            while (!isBusinessDay(nextDay)) {
+                nextDay.setDate(nextDay.getDate() + 1);
+            }
+            return nextDay;
+        }
+
+        // --- DATA STORE ---
+        // projectData.progress será carregado do Firestore.
+        // projectData.workouts, projectData.runs, projectData.nutrition, projectData.calendar e projectData.weeklySchedule
+        // continuam sendo dados estáticos do aplicativo por enquanto, pois são menos propensos a mudanças frequentes pelo usuário.
+        // Inicializa window.projectData com toda a estrutura, incluindo 'progress'
+        window.projectData = {
+            workouts: {
+                quarta_inferiores_b: { // Treino para Quarta-feira
+                    title: "🏋️‍♂️ TREINO INFERIORES B – QUARTA-FEIRA (28 SÉRIES)",
+                    series: 28,
+                    objective: "Foco: Quadríceps, Core e Lombar (sem adutores/abdutores)",
+                    groups: [
+                        {
+                            name: "Quadríceps",
+                            series: 12, // 3 exercícios * 4 séries = 12
+                            muscles: "quadríceps, reto femoral, vasto lateral, vasto medial, glúteos, isquiotibiais",
+                            exercises: [
+                                { name: "Agachamento com Barra", sets: "4 séries", howto: "Excelente para o <strong>Reto Femoral</strong>, <strong>Vasto Lateral</strong> e <strong>Vasto Medial</strong>." },
+                                { name: "Afundo com Halteres", sets: "4 séries", howto: "Trabalha o <strong>Quadríceps</strong>, <strong>Glúteos</strong> e <strong>Posterior da Coxa</strong>." },
+                                { name: "Avanço com Halteres (ou Parado)", sets: "4 séries", howto: "Foco no <strong>Quadríceps</strong> e no equilíbrio." }
+                            ]
+                        },
+                        {
+                            name: "Core/Abdômen",
+                            series: 12, // 3 exercícios * 4 séries = 12
+                            muscles: "core, oblíquos, reto abdominal, abdômen",
+                            exercises: [
+                                { name: "Abdominal Bicicleta", sets: "4 séries", howto: "Ativa os <strong>Oblíquos</strong> e o <strong>Reto Abdominal</strong>." },
+                                { name: "Elevação de Pernas", sets: "4 séries", howto: "Foco no <strong>Abdômen inferior</strong>." },
+                                { name: "Crunch Reto", sets: "4 séries", howto: "Trabalha o <strong>Abdômen superior</strong>." }
+                            ]
+                        },
+                        {
+                            name: "Lombar",
+                            series: 4, // 1 exercício * 4 séries = 4
+                            muscles: "lombar, glúteos",
+                            exercises: [
+                                { name: "Superman (Hiperextensão)", sets: "4 séries", howto: "Fortalece a <strong>Lombar</strong> e os <strong>Glúteos</strong>." }
+                            ]
+                        }
+                    ]
+                },
+                sexta_peito_triceps: { // Treino para Sexta-feira
+                    title: "🏋️‍♂️ TREINO PEITO + TRÍCEPS – SEXTA-FEIRA (27 SÉRIES)",
+                    series: 27,
+                    objective: "Desenvolver a força e o volume do peitoral e tríceps, essenciais para a estabilidade do tronco e o balanço dos braços durante a corrida.",
+                    groups: [
+                        {
+                            name: "Peitoral",
+                            series: 18, // 5 exercícios, séries ajustadas para somar 18
+                            muscles: "peitoral, peitoral maior, peitoral menor, deltoide (cabeça anterior), tríceps braquial",
+                            exercises: [
+                                { name: "Supino com Barra", sets: "4 séries", howto: "O clássico construtor de volume e força geral do <strong>Peitoral Maior</strong> e <strong>Peitoral Menor</strong>. Também ativa <strong>Tríceps Braquial</strong> e <strong>Deltoide (cabeça anterior)</strong>." },
+                                { name: "Supino Inclinado com Barra", sets: "4 séries", howto: "Foco no <strong>Peitoral Maior (foco superior)</strong>. Ativa também <strong>Deltoide (cabeça anterior)</strong> e <strong>Tríceps Braquial</strong>." },
+                                { name: "Crucifixo Reto com Halteres", sets: "4 séries", howto: "Isole e defina o centro do <strong>Peitoral Maior</strong>." },
+                                { name: "Voador em Pé no Cabo", sets: "3 séries", howto: "Trabalha o <strong>Peitoral Maior</strong> e <strong>Peitoral Menor</strong> de forma isolada." },
+                                { name: "Voador Curvado em Pé no Cabo", sets: "3 séries", howto: "Este exercício foca no <strong>Peitoral Maior</strong> e <strong>Peitoral Menor</strong> em diferentes ângulos." }
+                            ]
+                        },
+                        {
+                            name: "Tríceps",
+                            series: 9, // 3 exercícios * 3 séries = 9
+                            muscles: "tríceps, tríceps braquial",
+                            exercises: [
+                                { name: "Tríceps Francês com Halteres", sets: "3 séries", howto: "Ativando todas as cabeças do <strong>Tríceps Braquial (cabeça longa, medial, lateral)</strong>." },
+                                { name: "Tríceps Invertido na Polia (Cabo)", sets: "3 séries", howto: "Isole o <strong>Tríceps Braquial</strong>, com foco nas cabeças lateral e medial." },
+                                { name: "Tríceps na Polia (Cabo)", sets: "3 séries", howto: "Clássico para volume e definição do <strong>Tríceps Braquial</strong>." }
+                            ]
+                        }
+                    ]
+                },
+                sabado_ombros_trapezio: { // Treino para Sábado
+                    title: "💪 TREINO OMBROS + TRAPÉZIO – SÁBADO (27 SÉRIES)",
+                    series: 27,
+                    objective: "Desenvolver ombros largos e definidos, com trapézio imponente, melhorando a postura, estabilidade do tronco e o balanço dos braços durante a corrida.",
+                    groups: [
+                        {
+                            name: "Ombros",
+                            series: 18, // 6 exercícios * 3 séries = 18
+                            muscles: "ombros, deltoide, deltoide anterior, lateral, posterior, tríceps braquial, romboide maior, redondo menor",
+                            exercises: [
+                                { name: "Elevação Lateral com Halteres", sets: "3 séries", howto: "Ativando principalmente o <strong>Deltoide (cabeça média)</strong> e secundariamente o <strong>Trapézio (superior)</strong>." },
+                                { name: "Elevação Frontal com Placa", sets: "3 séries", howto: "Focando no <strong>Deltoide (cabeça anterior)</strong>." },
+                                { name: "Elevação Frontal com Barra", sets: "3 séries", howto: "Trabalha o <strong>Deltoide (cabeça anterior)</strong>." },
+                                { name: "Desenvolvimento (Pegada Aberta) com Barra", sets: "3 séries", howto: "Trabalhando todas as cabeças do <strong>Deltoide</strong>, <strong>Tríceps Braquial</strong> e <strong>Trapézio</strong>." },
+                                { name: "Crucifixo Inverso com Halteres", sets: "3 séries", howto: "Isole e defina seus <strong>Deltoide (cabeça posterior)</strong>, ativando também <strong>Romboide Maior</strong> e <strong>Redondo Menor</strong>." },
+                                { name: "Puxada no Rosto no Cabo", sets: "3 séries", howto: "Ótimo para o <strong>Deltoide (cabeça posterior)</strong> e para ativar o <strong>Trapézio</strong> e <strong>Romboide Maior</strong>." }
+                            ]
+                        },
+                        {
+                            name: "Trapézio",
+                            series: 9, // 3 exercícios * 3 séries = 9
+                            muscles: "trapézio, trapézio superior e médio, deltoide (cabeça lateral e anterior)",
+                            exercises: [
+                                { name: "Encolhimento de Ombros com Halteres", sets: "3 séries", howto: "Construa um <strong>Trapézio (superior)</strong> imponente e denso." },
+                                { name: "Remada para Cima com Barra (Upright Row)", sets: "3 séries", howto: "Ativa o <strong>Trapézio (superior e médio)</strong> e o <strong>Deltoide (cabeça lateral e anterior)</strong>." },
+                                { name: "Remada Alta com Barra", sets: "3 séries", howto: "Ativa o <strong>Trapézio (superior e médio)</strong> e <strong>Deltoide (cabeça lateral e anterior)</strong>." }
+                            ]
+                        }
+                    ]
+                },
+                domingo_inferiores_a: {
+                    title: "🏋️‍♂️ TREINO INFERIORES A – DOMINGO (30 SÉRIES)",
+                    series: 30,
+                    objective: "Foco: Glúteo, Quadríceps, Posteriores e Core",
+                    groups: [
+                        {
+                            name: "Glúteos",
+                            series: 6, // 2 exercícios * 3 séries = 6
+                            muscles: "glúteos, glúteo máximo, glúteo médio, isquiotibiais, adutores",
+                            exercises: [
+                                { name: "Hip Thrust com Barra", sets: "3 séries", howto: "Concentre-se na contração do <strong>Glúteo Máximo</strong> e <strong>Glúteo Médio</strong>, com assistência dos <strong>Isquiotibiais</strong>." },
+                                { name: "Agachamento Sumô com Barra", sets: "3 séries", howto: "Foco principal no <strong>Glúteo Máximo</strong> e nos <strong>Adutores</strong>." }
+                            ]
+                        },
+                        {
+                            name: "Posterior de Coxa",
+                            series: 6, // 2 exercícios * 3 séries = 6
+                            muscles: "posterior de coxa, isquiotibiais, glúteo máximo, lombar",
+                            exercises: [
+                                { name: "Levantamento Terra com Barra", sets: "3 séries", howto: "Trabalho primário de <strong>Glúteo Máximo</strong>, <strong>Isquiotibiais</strong> e <strong>Lombar</strong>." },
+                                { name: "Stiff com Halteres", sets: "3 séries", howto: "Alonga e fortalece os <strong>Isquiotibiais</strong> e o <strong>Glúteo Máximo</strong>." }
+                            ]
+                        },
+                        {
+                            name: "Panturrilhas",
+                            series: 6, // 2 exercícios * 3 séries = 6
+                            muscles: "panturrilhas, gastrocnêmio, sóleo",
+                            exercises: [
+                                { name: "Panturrilha no Step com Halteres", sets: "3 séries", howto: "Foco principal no <strong>Gastrocnêmio</strong>." },
+                                { name: "Panturrilha no Smith", sets: "3 séries", howto: "Ativa o <strong>Sóleo</strong> e o <strong>Gastrocnêmio</strong>." }
+                            ]
+                        },
+                        {
+                            name: "Core/Abdômen", // This group now accounts for 12 series in Domingo
+                            series: 12, // 3 exercícios * 4 séries = 12
+                            muscles: "core, reto abdominal, oblíquos, abdômen",
+                            exercises: [
+                                { name: "Elevação de Pernas", sets: "4 séries", howto: "Foco no <strong>Reto Abdominal inferior</strong>." },
+                                { name: "Crunch Reto", sets: "4 séries", howto: "Ativa o <strong>Reto Abdominal superior</strong>." },
+                                { name: "Abdominal Bicicleta", sets: "4 séries", howto: "Dinâmico e eficaz para todo o <strong>Reto Abdominal</strong>, <strong>Oblíquo Externo</strong> e <strong>Serrátil Anterior</strong>." }
+                            ]
+                        }
+                    ]
+                },
+                segunda_costas_antebraco_biceps: { // Treino para Segunda-feira
+                    title: "🦾 TREINO COSTAS + ANTEBRAÇO + BÍCEPS – SEGUNDA-FEIRA (30 SÉRIES)",
+                    series: 30,
+                    objective: "Desenvolver força e volume em costas, antebraços e bíceps para um tronco forte e braços definidos, essenciais para a performance geral.",
+                    groups: [
+                        {
+                            name: "Costas",
+                            series: 20, // 5 exercícios * 4 séries = 20
+                            muscles: "costas, latíssimo do dorso, romboide maior, redondo maior, erector da espinha, bíceps",
+                            exercises: [
+                                { name: "Remada Curvada com Barra", sets: "4 séries", howto: "Ganhe espessura e força para suas <strong>Costas (Latíssimo do Dorso, Romboide Maior, Redondo Maior)</strong>. Ativa também o <strong>Erector da Espinha</strong> e <strong>Bíceps</strong>." },
+                                { name: "Remada Curvada (Pegada Invertida) com Barra", sets: "4 séries", howto: "Trabalha os músculos das <strong>Costas</strong> de um ângulo diferente, com maior ênfase no <strong>Bíceps</strong>." },
+                                { name: "Puxada para Baixo Lateral (Pegada Aberta) no Cabo", sets: "4 séries", howto: "Essencial para a largura e definição do V-shape das costas, ativando principalmente o <strong>Latíssimo do Dorso</strong> e <strong>Redondo Maior</strong>." },
+                                { name: "Puxada para Baixo Lateral (Pegada Invertida) no Cabo", sets: "4 séries", howto: "Foco na ativação do <strong>Latíssimo do Dorso</strong> e <strong>Redondo Maior</strong>, com maior envolvimento do <strong>Bíceps</strong>." },
+                                { name: "Remada Sentado no Cabo", sets: "4 séries", howto: "Fortalece o miolo das <strong>Costas</strong> e a postura." }
+                            ]
+                        },
+                        {
+                            name: "Antebraço",
+                            series: 4, // 2 exercícios * 2 séries = 4
+                            muscles: "antebraco, flexores do punho, extensores do punho",
+                            exercises: [
+                                { name: "Rosca Punho (com barra ou halter)", sets: "2 séries", howto: "Fortalece os <strong>flexores do punho</strong>." },
+                                { name: "Rosca Inversa (com barra ou halter)", sets: "2 séries", howto: "Fortalece os <strong>extensores do punho</strong> e o <strong>braquiorradial</strong>." }
+                            ]
+                        },
+                        {
+                            name: "Bíceps",
+                            series: 6, // 2 exercícios * 3 séries = 6
+                            muscles: "bíceps, bíceps braquial, braquial, braquiorradial",
+                            exercises: [
+                                { name: "Rosca Direta com Barra", sets: "3 séries", howto: "Construtor de massa para o <strong>Bíceps Braquial</strong>." },
+                                { name: "Rosca Alternada com Halteres", sets: "3 séries", howto: "Trabalha o <strong>Bíceps Braquial</strong> e o <strong>Braquial</strong>." }
+                            ]
+                        }
+                    ]
+                }
+            },
+            runs: {
+                // Definições de Pace para Ampaulo - ATUALIZADO
+                paceDefinitionsAmpaulo: [
+                    { name: "Z1 – Recuperação Ativa", min_km: "7:31", max_km: "8:30", min_kmh: 7.06, max_kmh: 8.00, description: "Caminhada rápida ou trote suave" },
+                    { name: "Z2 – Ritmo Leve", min_km: "7:00", max_km: "7:30", min_kmh: 8.00, max_kmh: 8.57, description: "Conversa fácil, base regenerativa" },
+                    { name: "Z3 – Ritmo Moderado", min_km: "6:31", max_km: "6:59", min_kmh: 8.58, max_kmh: 9.16, description: "Levemente ofegante, treino aeróbico" },
+                    { name: "Z4 – Ritmo Forte", min_km: "6:00", max_km: "6:30", min_kmh: 9.23, max_kmh: 10.00, description: "Alta intensidade, foco em velocidade" },
+                    { name: "Z5 – Ritmo Máximo", min_km: "5:00", max_km: "5:59", min_kmh: 10.01, max_kmh: 12.00, description: "Sprint máximo, apenas intervalos" }
+                ],
+                // Definições de Pace para Eloísa (mantendo as anteriores)
+                paceDefinitionsEloisa: [
+                    { name: "Zona 1 (Z1) - Recuperação Ativa", min_km: "8:31", max_km: "9:30", min_kmh: 6.31, max_kmh: 7.05, description: "Ritmo muito leve, permite conversar sem esforço. Ideal para recuperação e aquecimento/desaquecimento." },
+                    { name: "Zona 2 (Z2) - Ritmo Leve", min_km: "7:45", max_km: "8:30", min_kmh: 7.06, max_kmh: 7.74, description: "Permite uma conversa confortável, ideal para base aeróbica e treinos de volume." },
+                    { name: "Zona 3 (Z3) - Ritmo Moderado", min_km: "7:00", max_km: "7:30", min_kmh: 8.00, max_kmh: 8.57, description: "A conversa fica um pouco mais difícil. Ritmo para melhorar a capacidade aeróbica e a resistência." },
+                    { name: "Zona 4 (Z4) - Ritmo Forte", min_km: "6:00", max_km: "6:30", min_kmh: 9.23, max_kmh: 10.00, description: "Alta intensidade, respiração ofegante. Usado para intervalos curtos e melhora da velocidade." },
+                    { name: "Zona 5 (Z5) - Ritmo Máximo/Sprint", min_km: "5:00", max_km: "5:59", min_kmh: 10.01, max_kmh: 12.00, description: "Esforço máximo, sprint. Apenas para períodos muito curtos. Trabalha potência e velocidade explosiva." }
+                ],
+                // Treinos do Ampaulo - ATUALIZADO com a nova estrutura e tempos
+                leve: {
+                    title: "🏃‍♂️ SEGUNDA-FEIRA – Corrida Leve (Z1–Z3)",
+                    schedule: "18h10 – 19h00",
+                    objective: "Corrida regenerativa com progressão leve",
+                    estimated_distance: "~6.2 km",
+                    total: { duration: "46 min 45 sec", distance: "6.4 km" }, // Adjusted based on sum of stages
+                    stages: [
+                        { km: "1", name: "Aquecimento", pace: "7:45/km", zone: "Z1", estimated_time: "7:45", observations: "Caminhada rápida / trote" },
+                        { km: "2", name: "Aquecimento", pace: "7:30/km", zone: "Z2", estimated_time: "7:30", observations: "Trote leve e constante" },
+                        { km: "3", name: "Ritmo Moderado", pace: "6:45/km", zone: "Z3", estimated_time: "6:45", observations: "Concentração no ritmo" },
+                        { km: "4", name: "Ritmo Leve", pace: "7:00/km", zone: "Z2", estimated_time: "7:00", observations: "Respiração tranquila" },
+                        { km: "5", name: "Ritmo Moderado", pace: "6:45/km", zone: "Z3", estimated_time: "6:45", observations: "Passada firme e natural" },
+                        { km: "6", name: "Ritmo Leve", pace: "7:00/km", zone: "Z2", estimated_time: "7:00", observations: "Foco no conforto final" },
+                        { km: "END", name: "Desaquecimento", pace: "7:30/km", zone: "Z2", estimated_time: "3:15 (0.4 km)", observations: "Caminhada + trote leve" }
+                    ]
+                },
+                intervalada: {
+                    title: "🏃‍♂️ QUARTA-FEIRA – Corrida Intervalada por Km",
+                    schedule: "18h10 – 19h00",
+                    objective: "Alternar estímulo aeróbico e anaeróbico leve",
+                    estimated_distance: "7.4 – 7.6 km",
+                    total: { duration: "50 min", distance: "7.4 – 7.6 km" },
+                    stages: [
+                        { km: "1", name: "Aquecimento", pace: "7:00/km", zone: "Z2", estimated_time: "7:00", observations: "Soltar articulações" },
+                        { km: "2", name: "Aquecimento", pace: "7:30/km", zone: "Z1", estimated_time: "7:30", observations: "Caminhada + trote leve" },
+                        { km: "3", name: "Ritmo Máximo", pace: "5:30/km", zone: "Z5", estimated_time: "5:30", observations: "Força e explosão" },
+                        { km: "4", name: "Ritmo Leve", pace: "7:00/km", zone: "Z2", estimated_time: "7:00", observations: "Recuperação com respiração" },
+                        { km: "5", name: "Ritmo Forte", pace: "6:00/km", zone: "Z4", estimated_time: "6:00", observations: "Frequência e constância" },
+                        { km: "6", name: "Ritmo Leve", pace: "7:00/km", zone: "Z2", estimated_time: "7:00", observations: "Estabilização do esforço" },
+                        { km: "7", name: "Ritmo Forte", pace: "6:00/km", zone: "Z4", estimated_time: "6:00", observations: "Finalização de estímulo" },
+                        { km: "8", name: "Desaquecimento", pace: "7:30/km", zone: "Z1", estimated_time: "4:00–4:30", observations: "Caminhada leve + trote final" }
+                    ]
+                },
+                longa: {
+                    title: "🏃‍♂️ SÁBADO – Corrida Longa (Z2–Z4)",
+                    schedule: "05h20 – 06h30",
+                    objective: "Construir resistência e consistência em ritmo médio",
+                    estimated_distance: "10.1 km",
+                    total: { duration: "73 min", distance: "11.1 km" }, // Adjusted based on sum of stages
+                    stages: [
+                        { km: "1", name: "Aquecimento", pace: "7:30/km", zone: "Z2", estimated_time: "7:30", observations: "Ritmo leve para aquecer" },
+                        { km: "2", name: "Ritmo Leve", pace: "7:15/km", zone: "Z2", estimated_time: "7:15", observations: "Transição gradual" },
+                        { km: "3", name: "Ritmo Moderado", pace: "7:00/km", zone: "Z3", estimated_time: "7:00", observations: "Base sólida" },
+                        { km: "4", name: "Ritmo Moderado", pace: "7:00/km", zone: "Z3", estimated_time: "7:00", observations: "Mantendo fluidez" },
+                        { km: "5", name: "Ritmo Leve", pace: "7:15/km", zone: "Z2", estimated_time: "7:15", observations: "Fase de recuperação ativa" },
+                        { km: "6", name: "Ritmo Moderado", pace: "6:50/km", zone: "Z3", estimated_time: "6:50", observations: "Retomando controle" },
+                        { km: "7", name: "Ritmo Moderado", pace: "6:45/km", zone: "Z3", estimated_time: "6:45", observations: "Leve aceleração" },
+                        { km: "8", name: "Ritmo Leve", pace: "7:15/km", zone: "Z2", estimated_time: "7:15", observations: "Ajuste respiratório" },
+                        { km: "9", name: "Ritmo Forte", pace: "6:30/km", zone: "Z4", estimated_time: "6:30", observations: "Estímulo forte final" },
+                        { km: "10", name: "Ritmo Moderado", pace: "6:50/km", zone: "Z3", estimated_time: "6:50", observations: "Manter até o final" },
+                        { km: "10.1", name: "Desaquecimento", pace: "7:30/km", zone: "Z1", estimated_time: "3:50 (1.1 km)", observations: "Caminhada + trote leve" }
+                    ]
+                },
+                // Treino de Corrida para Eloísa (Iniciante)
+                segunda_eloisa: {
+                    title: "🏃‍♀️ SEGUNDA – TREINO DE CORRIDA ELOÍSA (50 MIN)", // Updated duration
+                    stages: [
+                        { name: "Aquecimento", duration: "10 min", pace: "Caminhada leve 🚶‍♀️" },
+                        { name: "Parte Principal", duration: "8 ciclos de (1 min corrida leve 🏃‍♀️ + 2 min caminhada 🚶‍♀️)", pace: "Ritmo do corpo" },
+                        { name: "Desaquecimento", duration: "6 min", pace: "Caminhada leve 🚶‍♀️" }
+                    ],
+                    total: { duration: "50 minutos", distance: "Ritmo do corpo" } // Updated total
+                },
+                quarta_eloisa: {
+                    title: "🏃‍♀️ QUARTA – TREINO DE CORRIDA ELOÍSA (50 MIN)",
+                    stages: [
+                        { name: "Aquecimento", duration: "10 min", pace: "Caminhada leve 🚶‍♀️" },
+                        { name: "Parte Principal", duration: "10 ciclos de (1 min 30s corrida 🏃‍♀️ + 2 min caminhada 🚶‍♀️)", pace: "Ritmo do corpo" },
+                        { name: "Desaquecimento", duration: "5 min", pace: "Caminhada leve 🚶‍♀️" }
+                    ],
+                    total: { duration: "50 minutos", distance: "Ritmo do corpo" }
+                },
+                sabado_eloisa: {
+                    title: "🏃‍♀️ SÁBADO – TREINO DE CORRIDA ELOÍSA (70 MIN)", // Updated duration
+                    stages: [
+                        { name: "Aquecimento", duration: "10 min", pace: "Caminhada leve 🚶‍♀️" },
+                        { name: "Parte Principal", duration: "10 ciclos de (2 min corrida 🏃‍♀️ + 2 min caminhada 🚶‍♀️)", pace: "Ritmo do corpo" },
+                        { name: "Desaquecimento", duration: "10 min", pace: "Caminhada leve 🚶‍♀️" }
+                    ],
+                    total: { duration: "70 minutos", distance: "Ritmo do corpo" } // Updated total
+                }
+            },
+            nutrition: {
+                meals: [
+                    { name: "Café da Manhã", items: "135g Cuscuz, 3 Ovos, 2 Bananas, Café (opcional)" },
+                    { name: "Almoço", items: "160g Arroz, 130g Feijão, 100-150g Proteína Magra, Vegetais, 100g Melão" },
+                    { name: "Jantar", items: "135g Cuscuz, 3 Ovos, 2 Bananas" },
+                ],
+                isotonic: {
+                    title: "💧 Bebida Isotônica Caseira",
+                    recipe: "500ml de água, suco de 1 limão, 1 pitada de sal, 1 colher de sopa de mel (opcional)."
+                },
+                macros: [
+                    { meal: "Café da Manhã", protein: 26.2, carbs: 78.7, fat: 16.8, kcal: 560 },
+                    { meal: "Almoço", protein: "62.4 - 65.4", carbs: "84.8 - 89.8", fat: "6.9 - 7.4", kcal: "694 - 757" },
+                    { meal: "Jantar", protein: 26.2, carbs: 78.7, fat: 16.8, kcal: 560 },
+                ],
+                total: { protein: 114.8, carbs: 242.2, fat: 41.0, kcal: 1797 },
+                naturalImmunity: {
+                    title: "💪 Reforço Imunológico Natural no Inverno",
+                    sections: [
+                        {
+                            heading: "Para o Corredor no Frio:",
+                            items: [
+                                "✅ <strong>Uso de máscara fina ou bandana</strong> cobrindo nariz e boca durante a corrida no frio intenso. Isso aquece e umidifica o ar, protegendo as vias aéreas.",
+                                "✅ <strong>Aqueça dentro de casa</strong> por 5 minutos antes de sair (polichinelos, corrida estacionária).",
+                                "✅ <strong>Treine a respiração nasal</strong> no início da corrida. O nariz é o filtro e aquecedor natural do ar."
+                            ]
+                        },
+                        {
+                            heading: "Suplementos Naturais e Hábitos:",
+                            items: [
+                                "🍯 <strong>Mel com própolis:</strong> 1 colher de chá de mel com 5-10 gotas de extrato de própolis (1x/dia). Potente antimicrobiano e anti-inflamatório.",
+                                "🍊 <strong>Vitamina C natural:</strong> Suco de acerola, laranja, limão, kiwi. Ou suplemento (500mg/dia), se indicado.",
+                                "🧄 <strong>Alho cru picado:</strong> 1 dente pequeno por dia (com comida, se tolerar). Poderoso antiviral e antibacteriano.",
+                                "☀️ <strong>Vitamina D:</strong> Mantenha a suplementação conforme orientação profissional para níveis acima de 30-40 ng/mL, essencial para a imunidade.",
+                                "😴 <strong>Sono de qualidade:</strong> Priorize 7-9 horas de sono por noite para a recuperação e fortalecimento imunológico."
+                            ]
+                        },
+                        {
+                            heading: "Sinais de Alerta (Quando Procurar Médico):",
+                            items: [
+                                "Dor forte ao engolir que persiste.",
+                                "Febre ou calafrios.",
+                                "Pus nas amígdalas.",
+                                "Tosse persistente com catarro espesso ou alteração de cor.",
+                                "Sintomas que não melhoram em 3 dias com as medidas caseiras."
+                            ]
+                        }
+                    ]
+                }
+            },
+            // Dados de progresso - agora inicializados aqui no escopo global
+            progress: {
+                dates: ['10/01/2024', '31/07/2024', '05/05/2025'],
+                weight: [98.7, 92.8, 96.8],
+                fatPercentage: [24.9, 16.4, 19.5],
+                fatMass: [24.5, 15.3, 18.9],
+                leanMass: [74.2, 77.5, 77.9],
+                waist: [93, 87, 93],
+                abdomen: [100, 93, 96],
+                skinfolds: {
+                    labels: ['Tricipital', 'Abdominal', 'Subescapular', 'Axilar Média', 'Torácica', 'Suprailíaca'],
+                    data: [
+                        [45, 40, 35, 25, 20, 20], // 10/01/2024
+                        [11.2, 30, 23.6, 12.4, 9.5, 14.7], // 31/07/2024
+                        [12, 32, 30, 16, 15, 20]  // 05/05/2025
+                    ]
+                }
+            },
+            calendar: (() => {
+                const julyDays = 31; // July has 31 days
+                const daysData = [];
+                // July 1, 2025 is a Tuesday (getDay() returns 2)
+                // Update calendar activities to reflect the new workout schedule
+                const newCalendarActivities = [
+                    { day: 1, weekday: "Terça-feira", activity: "MUSCULAÇÃO: TREINO INFERIORES B", msg: "Mantenha o foco e a disciplina.", verse: "Provérbios 3:6" }, // Original Tuesday activity
+                    { day: 2, weekday: "Quarta-feira", activity: "MUSCULAÇÃO: TREINO INFERIORES B<br>CORRIDA INTERVALADA (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "Postura e força para seus ombros! Mantenha a forma.", verse: "Provérbios 21:5" }, // Updated for Wednesday
+                    { day: 3, weekday: "Quinta-feira", activity: "CORRIDA INTERVALADA (7 KM)", msg: "Desafie seus limites de velocidade e resistência. Avance!", verse: "Romanos 12:21" }, // Original Thursday activity
+                    { day: 4, weekday: "Sexta-feira", activity: "MUSCULAÇÃO: TREINO PEITO + TRÍCEPS", msg: "Core forte, costas poderosas. O centro do seu poder!", verse: "Provérbios 14:23" },
+                    { day: 5, weekday: "Sábado", activity: "MUSCULAÇÃO: TREINO OMBROS + TRAPÉZIO<br>CORRIDA LONGA (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "Resistência e estratégia na sua corrida mais longa! Conquiste!", verse: "Hebreus 12:1" }, // Updated for Saturday
+                    { day: 6, weekday: "Domingo", activity: "MUSCULAÇÃO: TREINO INFERIORES A", msg: "Um novo ciclo de força começa hoje! Dê o seu melhor.", verse: "Salmos 28:7" },
+                    { day: 7, weekday: "Segunda-feira", activity: "MUSCULAÇÃO: TREINO COSTAS + ANTEBRAÇO + BÍCEPS<br>CORRIDA LEVE (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "Construa sua força de cima para baixo. Foco e execução!", verse: "Filipenses 4:13" }, // Updated for Monday
+                    { day: 8, weekday: "Terça-feira", activity: "MUSCULAÇÃO: TREINO INFERIORES B", msg: "Supere-se! Cada treino é uma oportunidade de ir além.", verse: "Colossenses 3:23" }, // Original Tuesday activity
+                    { day: 9, weekday: "Quarta-feira", activity: "MUSCULAÇÃO: TREINO INFERIORES B<br>CORRIDA INTERVALADA (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "Foco nos ombros e trapézio, base para tudo. Construa sua força.", verse: "Lucas 16:10" }, // Updated for Wednesday
+                    { day: 10, weekday: "Quinta-feira", activity: "CORRIDA INTERVALADA (7 KM)", msg: "Seu corpo é seu templo. Honre-o com a dedicação que ele merece.", verse: "1 Coríntios 6:19" }, // Original Thursday activity
+                    { day: 11, weekday: "Sexta-feira", activity: "MUSCULAÇÃO: TREINO PEITO + TRÍCEPS", msg: "Aproxime-se do fim de semana com a sensação de dever cumprido.", verse: "Provérbios 9:10" },
+                    { day: 12, weekday: "Sábado", activity: "MUSCULAÇÃO: TREINO OMBROS + TRAPÉZIO<br>CORRIDA LONGA (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "A corrida longa testa sua mente e fortalece seu espírito.", verse: "Josué 1:9" }, // Updated for Saturday
+                    { day: 13, weekday: "Domingo", activity: "MUSCULAÇÃO: TREINO INFERIORES A", msg: "Descanse bem, reflita sobre seu progresso e agradeça.", verse: "1 Pedro 5:7" },
+                    { day: 14, weekday: "Segunda-feira", activity: "MUSCULAÇÃO: TREINO COSTAS + ANTEBRAÇO + BÍCEPS<br>CORRIDA LEVE (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "Nova semana, novas metas. Mantenha o ritmo.", verse: "Salmos 37:5" }, // Updated for Monday
+                    { day: 15, weekday: "Terça-feira", activity: "MUSCULAÇÃO: TREINO INFERIORES B", msg: "Cada passo conta. Siga em frente com determinação.", verse: "Provérbios 24:16" }, // Original Tuesday activity
+                    { day: 16, weekday: "Quarta-feira", activity: "MUSCULAÇÃO: TREINO INFERIORES B<br>CORRIDA INTERVALADA (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "A força vem de dentro. Acredite no seu potencial.", verse: "Isaías 41:10" }, // Updated for Wednesday
+                    { day: 17, weekday: "Quinta-feira", activity: "CORRIDA INTERVALADA (7 KM)", msg: "Desafie seus limites. O progresso está na superação.", verse: "Filipenses 3:14" }, // Original Thursday activity
+                    { day: 18, weekday: "Sexta-feira", activity: "MUSCULAÇÃO: TREINO PEITO + TRÍCEPS", msg: "Foco na forma e na técnica. Qualidade acima de tudo.", verse: "Efésios 4:29" },
+                    { day: 19, weekday: "Sábado", activity: "MUSCULAÇÃO: TREINO OMBROS + TRAPÉZIO<br>CORRIDA LONGA (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "Sua dedicação é inspiradora. Continue firme no caminho.", verse: "Gálatas 6:9" }, // Updated for Saturday
+                    { day: 20, weekday: "Domingo", activity: "MUSCULAÇÃO: TREINO INFERIORES A", msg: "Recupere-se e prepare-se para a próxima semana de vitórias.", verse: "Mateus 11:28" },
+                    { day: 21, weekday: "Segunda-feira", activity: "MUSCULAÇÃO: TREINO COSTAS + ANTEBRAÇO + BÍCEPS<br>CORRIDA LEVE (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "Recomece com garra. A cada dia, um novo recorde pessoal.", verse: "2 Timóteo 1:7" }, // Updated for Monday
+                    { day: 22, weekday: "Terça-feira", activity: "MUSCULAÇÃO: TREINO INFERIORES B", msg: "Sua resistência aumenta a cada passo. Não desista!", verse: "Romanos 5:3-4" }, // Original Tuesday activity
+                    { day: 23, weekday: "Quarta-feira", activity: "MUSCULAÇÃO: TREINO INFERIORES B<br>CORRIDA INTERVALADA (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "Construa seu corpo com propósito e disciplina.", verse: "1 Coríntios 9:27" }, // Updated for Wednesday
+                    { day: 24, weekday: "Quinta-feira", activity: "CORRIDA INTERVALADA (7 KM)", msg: "A mente forte leva o corpo a lugares incríveis.", verse: "Provérbios 4:23" }, // Original Thursday activity
+                    { day: 25, weekday: "Sexta-feira", activity: "MUSCULAÇÃO: TREINO PEITO + TRÍCEPS", msg: "Último treino de força do mês. Dê tudo de si. Celebre a sua força!", verse: "1 Tessalonicenses 5:18" },
+                    { day: 26, weekday: "Sábado", activity: "MUSCULAÇÃO: TREINO OMBROS + TRAPÉZIO<br>CORRIDA LONGA (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "Você chegou ao final do mês com excelência. Orgulhe-se de cada passo!", verse: "Filipenses 4:4" }, // Updated for Saturday
+                    { day: 27, weekday: "Domingo", activity: "MUSCULAÇÃO: TREINO INFERIORES A", msg: "Dia de avaliação e gratidão. Prepare-se para um novo mês ainda mais forte!", verse: "Salmos 9:1" },
+                    { day: 28, weekday: "Segunda-feira", activity: "MUSCULAÇÃO: TREINO COSTAS + ANTEBRAÇO + BÍCEPS<br>CORRIDA LEVE (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "Fechando o mês com chave de ouro e abrindo caminho para novas conquistas. Parabéns pela sua dedicação!", verse: "1 Coríntios 15:58" }, // Updated for Monday
+                    { day: 29, weekday: "Terça-feira", activity: "MUSCULAÇÃO: TREINO INFERIORES B", msg: "Mantenha o foco e a disciplina.", verse: "Provérbios 3:6" },
+                    { day: 30, weekday: "Quarta-feira", activity: "MUSCULAÇÃO: TREINO INFERIORES B<br>CORRIDA INTERVALADA (Ampaulo) / TREINO DE CORRIDA (Eloísa)", msg: "Mantenha o foco e a disciplina.", verse: "Provérbios 3:6" },
+                    { day: 31, weekday: "Quinta-feira", activity: "CORRIDA INTERVALADA (7 KM)", msg: "Mantenha o foco e a disciplina.", verse: "Provérbios 3:6" }
+                ];
+
+                const existingDataMap = new Map();
+                newCalendarActivities.forEach(item => {
+                    existingDataMap.set(item.day, item);
+                });
+
+                for (let i = 1; i <= julyDays; i++) {
+                    const date = new Date(2025, 6, i); // Month is 0-indexed (July is 6)
+                    const weekdayName = getDayName(date);
+
+                    if (existingDataMap.has(i)) {
+                        daysData.push(existingDataMap.get(i)); // Use get(i) to retrieve the object
+                    } else {
+                        // Fallback for days not explicitly defined in newCalendarActivities
+                        daysData.push({
+                            day: i,
+                            weekday: weekdayName,
+                            activity: "Dia de Atividade Livre",
+                            msg: "Mantenha-se ativo e focado nos seus objetivos.",
+                            verse: "Provérbios 3:6"
+                        });
+                    }
+                }
+                return daysData;
+            })(),
+            weeklySchedule: [
+                { day: "Quarta-feira", schedule: [
+                    {time: "05:20-06:30", task: "💪 MUSCULAÇÃO: TREINO INFERIORES B"},
+                    {time: "18:10-19:00", task: "🏃‍♂️ CORRIDA INTERVALADA (Ampaulo) / 🏃‍♀️ TREINO DE CORRIDA (Eloísa)"}, // Added running for Wednesday
+                    {time: "21:00-22:00", task: "📚 ESTUDO"},
+                    {time: "20:00-20:30", task: "📖 LEITURA BÍBLICA EM FAMÍLIA"}
+                ]},
+                { day: "Sexta-feira", schedule: [
+                    {time: "05:20-06:30", task: "🏋️‍♂️ MUSCULAÇÃO: TREINO PEITO + TRÍCEPS"},
+                    {time: "21:00-22:00", task: "📚 ESTUDO"},
+                    {time: "20:00-20:30", task: "📖 LEITURA BÍBLICA EM FAMÍLIA"}
+                ]},
+                { day: "Sábado", schedule: [
+                    {time: "07:10-08:10", task: "💪 MUSCULAÇÃO: TREINO OMBROS + TRAPÉZIO"},
+                    {time: "05:20-06:30", task: "🏃‍♂️ CORRIDA LONGA (Ampaulo) / 🏃‍♀️ TREINO DE CORRIDA (Eloísa)"}, // Added running for Saturday
+                    {time: "14:20-17:00", task: "👨‍👩‍👦 AULAS DOS FILHOS"},
+                    {time: "20:00-20:30", task: "📖 LEITURA BÍBLICA EM FAMÍLIA"}
+                ]},
+                { day: "Domingo", schedule: [
+                    {time: "06:00-07:10", task: "🏋️‍♂️ MUSCULAÇÃO: TREINO INFERIORES A"},
+                    {time: "09:00-11:20", task: "🙏 ESCOLA BÍBLICA DOMINICAL"},
+                    {time: "18:30-20:00", task: "🙏 CULTO NA IGREJA"}
+                ]},
+                { day: "Segunda-feira", schedule: [
+                    {time: "05:20-06:30", task: "🦾 MUSCULAÇÃO: TREINO COSTAS + ANTEBRAÇO + BÍCEPS"},
+                    {time: "05:20-06:00", task: "🏃‍♂️ CORRIDA LEVE (Ampaulo) / 🏃‍♀️ TREINO DE CORRIDA (Eloísa)"}, // Added running for Monday
+                    {time: "21:00-22:00", task: "📚 ESTUDO"},
+                    {time: "20:00-20:30", task: "📖 LEITURA BÍBLICA EM FAMÍLIA"}
+                ]},
+                { day: "Terça-feira", schedule: [
+                    {time: "05:20-06:00", task: "🏃‍♂️ CORRIDA LEVE"}, // Original Tuesday running
+                    {time: "20:00-20:45", task: "🙏 CULTO EM FAMÍLIA EM NOSSA CASA"}
+                ]},
+                { day: "Quinta-feira", schedule: [
+                    {time: "05:20-06:10", task: "🏃‍♂️ CORRIDA INTERVALADA"}, // Original Thursday running
+                    {time: "19:30-21:00", task: "🙏 CULTO PG ATALAIA"}
+                ]}
+            ],
+            finances: {
+                billPayments: [ // Only Vencimentos
+                    { name: "Vencimento Fatura Energia (Coelba)", day: 3, type: "Vencimento" },
+                    { name: "Vencimento Fatura Cartão Inter", day: 7, type: "Vencimento" },
+                    { name: "Vencimento Consórcio Biz (Honda)", day: 10, type: "Vencimento" }, // New entry
+                    { name: "Vencimento Fatura Cartão C6Bank", day: 20, type: "Vencimento" },
+                    { name: "Vencimento Fatura Internet (Netcenter)", day: 20, type: "Vencimento" },
+                    { name: "Vencimento Fatura PicPay", day: 25, type: "Vencimento" }, // Corrected name
+                    { name: "Vencimento Fatura Água (Embasa)", day: 30, type: "Vencimento" }
+                ].sort((a, b) => {
+                    // Sort by day first
+                    if (a.day !== b.day) {
+                        return a.day - b.day;
+                    }
+                    // If days are the same, sort by name to maintain consistent order as per user's list
+                    return a.name.localeCompare(b.name);
+                }),
+                creditCardInfo: [ // For Fechamento dates and other card info
+                    { name: "Cartão Inter", closingDay: 30, maturityDay: 7 },
+                    { name: "Cartão C6Bank", closingDay: 10, maturityDay: 20 },
+                    { name: "Cartão PicPay", closingDay: 15, maturityDay: 25 }
+                ].sort((a, b) => a.maturityDay - b.maturityDay), // Sort by maturityDay
+                salaryDetails: {
+                    salaryDay: 5, // 5º dia útil
+                    advanceDay: 20 // Dia 20
+                }
+            }
+        };
+    </script>
+
+    <!-- Firebase SDK - Importação dos módulos necessários -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Variáveis globais para Firebase (serão preenchidas ao carregar)
+        let app;
+        let db;
+        let auth;
+        let userId;
+
+        // Dados do perfil do usuário (passa a ser reativo ao Firestore)
+        window.userProfile = {
+            name: "Convidado", // Padrão antes de carregar
+            gender: "nao-informar",
+            dob: "1990-01-01",
+            height: 0,
+            currentWeight: 0,
+            idealWeight: 0,
+            email: "",
+            phone: ""
+        };
+
+        // Função de inicialização do Firebase e autenticação
+        async function initializeFirebaseAndAuth() {
+            try {
+                console.log("Iniciando Firebase e Autenticação...");
+                // Acessa as variáveis globais fornecidas pelo ambiente Canvas
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+
+                if (Object.keys(firebaseConfig).length === 0) {
+                    console.warn("Firebase config não encontrada. Os dados não serão persistidos.");
+                    // Continua sem Firebase se a configuração não estiver disponível
+                    document.dispatchEvent(new Event('firebaseAuthReady')); // Dispara evento mesmo sem Firebase
+                    return;
+                }
+
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Autenticar o usuário
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                    console.log("Autenticado com token personalizado.");
+                } else {
+                    await signInAnonymously(auth);
+                    console.log("Autenticado anonimamente.");
+                }
+
+                // Escutar mudanças no estado de autenticação
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("UserID:", userId);
+                        // Carregar dados do usuário e progresso após autenticação
+                        await window.loadUserProfileFromFirestore();
+                        await window.loadProgressDataFromFirestore();
+                        // Dispara um evento quando o Firebase e a autenticação estiverem prontos
+                        document.dispatchEvent(new Event('firebaseAuthReady'));
+                    } else {
+                        userId = null;
+                        console.log("Usuário deslogado.");
+                    }
+                });
+
+            } catch (error) {
+                console.error("Erro ao inicializar Firebase ou autenticar:", error);
+            }
+        }
+
+        // Chamar a função de inicialização do Firebase quando o DOM estiver carregado
+        document.addEventListener('DOMContentLoaded', initializeFirebaseAndAuth);
+
+        // Funções para Firestore
+        window.saveUserProfileToFirestore = async () => {
+            if (!userId || !db) { console.warn("Usuário não autenticado ou Firestore não inicializado. Não é possível salvar o perfil."); return; }
+            const userDocRef = doc(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/profile`, 'user-data');
+            try {
+                await setDoc(userDocRef, window.userProfile, { merge: true });
+                console.log("Perfil do usuário salvo com sucesso no Firestore!");
+            } catch (e) {
+                console.error("Erro ao salvar perfil do usuário:", e);
+            }
+        };
+
+        window.loadUserProfileFromFirestore = async () => {
+            return new Promise((resolve) => {
+                if (!userId || !db) { console.warn("Usuário não autenticado ou Firestore não inicializado. Não é possível carregar o perfil."); resolve(); return; }
+                const userDocRef = doc(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/profile`, 'user-data');
+                onSnapshot(userDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        Object.assign(window.userProfile, data);
+                        console.log("Perfil do usuário carregado do Firestore:", window.userProfile);
+                        // Atualiza os campos do formulário
+                        document.getElementById('user-name').value = window.userProfile.name;
+                        document.getElementById('user-gender').value = window.userProfile.gender;
+                        document.getElementById('user-dob').value = window.userProfile.dob;
+                        document.getElementById('user-height').value = window.userProfile.height;
+                        document.getElementById('user-current-weight').value = window.userProfile.currentWeight;
+                        document.getElementById('user-ideal-weight').value = window.userProfile.idealWeight;
+                        document.getElementById('user-email').value = window.userProfile.email;
+                        document.getElementById('user-phone').value = window.userProfile.phone;
+
+                    } else {
+                        console.log("Nenhum perfil de usuário encontrado no Firestore. Usando valores padrão.");
+                    }
+                    resolve();
+                }, (error) => {
+                    console.error("Erro ao carregar perfil do usuário:", error);
+                    resolve();
+                });
+            });
+        };
+
+        window.saveProgressDataToFirestore = async () => {
+            if (!userId || !db) { console.warn("Usuário não autenticado ou Firestore não inicializado. Não é possível salvar o progresso."); return; }
+            const progressDocRef = doc(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/progress`, 'progress-data');
+            try {
+                // Converta o objeto progress para JSON antes de salvar, para lidar com arrays aninhados
+                await setDoc(progressDocRef, { data: JSON.stringify(window.projectData.progress) }, { merge: true });
+                console.log("Dados de progresso salvos com sucesso no Firestore!");
+            } catch (e) {
+                console.error("Erro ao salvar dados de progresso:", e);
+            }
+        };
+
+        window.loadProgressDataFromFirestore = async () => {
+            return new Promise((resolve) => {
+                if (!userId || !db) { console.warn("Usuário não autenticado ou Firestore não inicializado. Não é possível carregar o progresso."); resolve(); return; }
+                const progressDocRef = doc(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/progress`, 'progress-data');
+                onSnapshot(progressDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        if (data.data) {
+                            // Parse o JSON de volta para objeto
+                            Object.assign(window.projectData.progress, JSON.parse(data.data));
+                            console.log("Dados de progresso carregados do Firestore:", window.projectData.progress);
+                            renderProgressTable(); // Renderiza a tabela com os dados carregados
+                        }
+                    } else {
+                        console.log("Nenhum dado de progresso encontrado. Usando dados padrão.");
+                    }
+                    resolve();
+                }, (error) => {
+                    console.error("Erro ao carregar dados de progresso:", error);
+                    resolve();
+                });
+            });
+        };
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        .nav-button {
+            transition: all 0.3s ease;
+        }
+        .nav-button.active {
+            background-color: #0d9488; /* teal-600 */
+            color: white;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        .view {
+            display: none;
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        .view.active {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .chart-container {
+            position: relative;
+            margin: auto;
+            height: 40vh;
+            width: 100%;
+            max-width: 800px;
+        }
+        /* Styles for main workout accordions */
+        .workout-accordion-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.5s ease-in-out;
+            overflow-y: auto; /* Enable vertical scrolling */
+            overflow-x: hidden; /* Prevent horizontal scroll unless necessary for child elements */
+        }
+        .workout-accordion-button.open + .workout-accordion-content {
+            max-height: 2000px; /* Sufficiently large to cover all content, will be limited by actual scrollHeight */
+        }
+        /* Styles for nested group accordions */
+        .group-accordion-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.5s ease-in-out;
+            overflow-y: auto; /* Enable vertical scrolling for group content */
+            overflow-x: auto; /* Enable horizontal scrolling for exercises if text overflows */
+        }
+        .group-accordion-button.open + .group-accordion-content {
+            max-height: 2000px; /* Sufficiently large to cover all content, will be limited by actual scrollHeight */
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #0d9488; /* teal-600 */
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Table styling for alternating rows */
+        .run-table thead tr {
+            background-color: #1f2937; /* Darker header background */
+            color: #ffffff; /* White text for header */
+        }
+        .run-table tbody tr:nth-child(odd) {
+            background-color: #f8fafc; /* Light gray for odd rows */
+        }
+        .run-table tbody tr:nth-child(even) {
+            background-color: #ffffff; /* White for even rows */
+        }
+        .run-table tbody tr {
+            transition: background-color 0.2s ease-in-out;
+        }
+        .run-table tbody tr:hover {
+            background-color: #e0f2f7; /* Very light teal on hover */
+        }
+        /* Ensures vertical scrolling for the table content if it overflows */
+        .run-table-wrapper {
+            overflow-x: auto; /* Horizontal scrollbar if table content is too wide */
+            overflow-y: auto; /* Vertical scrollbar if table content is too tall */
+            max-height: 400px; /* Example max height for table wrapper, adjust as needed */
+        }
+
+        /* Style for editable cells */
+        [contenteditable="true"] {
+            min-width: 50px; /* Ensure editable cells have a minimum width */
+            padding: 4px;
+            border: 1px dashed #ccc;
+            outline: none;
+            cursor: text;
+        }
+        [contenteditable="true"]:focus {
+            border-color: #0d9488;
+            background-color: #e0f2f7;
+        }
+
+        /* Styles for sub-navigation buttons within "Corrida" view */
+        .sub-nav-button {
+            transition: all 0.3s ease;
+        }
+        .sub-nav-button.active {
+            background-color: #0d9488; /* teal-600 */
+            color: white;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        .run-content-section {
+            display: none;
+        }
+        .run-content-section.active {
+            display: block;
+        }
+
+        /* Calendar specific styles for better visibility */
+        .calendar-day {
+            min-height: 96px; /* Equivalent to h-24, but flexible */
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: flex-start;
+            text-align: left;
+            padding: 0.5rem; /* Add some padding */
+            box-sizing: border-box; /* Include padding in element's total width and height */
+            /* Remove truncate to allow activity text to wrap */
+        }
+
+        .calendar-day .font-bold {
+            align-self: flex-end; /* Push day number to top right */
+        }
+        .calendar-day .text-xs {
+            margin-top: 0.25rem; /* Space between day number and activity */
+            line-height: 1.2; /* Adjust line height for better readability */
+            white-space: normal; /* Allow text to wrap */
+            overflow: visible; /* Ensure content is not hidden */
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+    <div id="app" class="min-h-screen">
+        <!-- Header -->
+        <header class="bg-white shadow-sm sticky top-0 z-40">
+            <div class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8">
+                <h1 class="text-2xl font-bold text-slate-900">🚀 PROJETO AMPAULO – Painel de Bordo</h1>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="bg-white shadow-md mb-8 sticky top-[72px] z-30">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex flex-wrap justify-center items-center gap-2 py-2">
+                    <button data-target="home" class="nav-button active text-sm font-medium py-2 px-4 rounded-full bg-slate-200 text-slate-700 hover:bg-teal-500 hover:text-white">🏠 Home</button>
+                    <button data-target="hoje" class="nav-button text-sm font-medium py-2 px-4 rounded-full bg-slate-200 text-slate-700 hover:bg-teal-500 hover:text-white">📅 Hoje</button>
+                    <button data-target="amanha" class="nav-button text-sm font-medium py-2 px-4 rounded-full bg-slate-200 text-slate-700 hover:bg-teal-500 hover:text-white">➡️ Amanhã</button>
+                    <button data-target="treino" class="nav-button text-sm font-medium py-2 px-4 rounded-full bg-slate-200 text-slate-700 hover:bg-teal-500 hover:text-white">🏋️‍♂️ Treino</button>
+                    <button data-target="corrida" class="nav-button text-sm font-medium py-2 px-4 rounded-full bg-slate-200 text-slate-700 hover:bg-teal-500 hover:text-white">🏃‍♂️ Corrida</button>
+                    <button data-target="nutricao" class="nav-button text-sm font-medium py-2 px-4 rounded-full bg-slate-200 text-slate-700 hover:bg-teal-500 hover:text-white">🥗 Nutrição</button>
+                    <button data-target="progresso" class="nav-button text-sm font-medium py-2 px-4 rounded-full bg-slate-200 text-slate-700 hover:bg-teal-500 hover:text-white">📊 Progresso</button>
+                    <button data-target="calendario" class="nav-button text-sm font-medium py-2 px-4 rounded-full bg-slate-200 text-slate-700 hover:bg-teal-500 hover:text-white">🗓️ Calendário</button>
+                    <button data-target="financas" class="nav-button text-sm font-medium py-2 px-4 rounded-full bg-slate-200 text-slate-700 hover:bg-teal-500 hover:text-white">💰 Finanças</button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
+            <!-- View: Home (Dados Cadastrais) -->
+            <div id="home" class="view active">
+                <div class="bg-white p-8 rounded-lg shadow-md mb-8">
+                    <h2 class="text-3xl font-bold text-teal-700 mb-4 text-center">👋 Bem-vindo(a) ao Projeto Ampaulo!</h2>
+                    <p class="text-slate-600 mb-6 text-center max-w-2xl mx-auto">Este é o seu guia mensal de alta performance. Preencha seus dados para personalizarmos ainda mais a sua experiência e começarmos essa jornada juntos!</p>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="user-name" class="block text-sm font-medium text-slate-700">Nome:</label>
+                            <input type="text" id="user-name" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 sm:text-sm p-2" value="Ampaulo">
+                        </div>
+                        <div>
+                            <label for="user-gender" class="block text-sm font-medium text-slate-700">Sexo:</label>
+                            <select id="user-gender" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 sm:text-sm p-2">
+                                <option value="masculino">Masculino</option>
+                                <option value="feminino">Feminino</option>
+                                <option value="nao-informar">Não Informar</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="user-dob" class="block text-sm font-medium text-slate-700">Data de Nascimento:</label>
+                            <input type="date" id="user-dob" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 sm:text-sm p-2" value="1990-01-01">
+                        </div>
+                        <div>
+                            <label for="user-height" class="block text-sm font-medium text-slate-700">Altura (cm):</label>
+                            <input type="number" id="user-height" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 sm:text-sm p-2" value="180">
+                        </div>
+                        <div>
+                            <label for="user-current-weight" class="block text-sm font-medium text-slate-700">Peso Atual (kg):</label>
+                            <input type="number" step="0.1" id="user-current-weight" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 sm:text-sm p-2" value="97.0">
+                        </div>
+                         <div>
+                            <label for="user-ideal-weight" class="block text-sm font-medium text-slate-700">Peso Ideal (kg):</label>
+                            <input type="number" step="0.1" id="user-ideal-weight" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 sm:text-sm p-2" value="80.0">
+                        </div>
+                        <div>
+                            <label for="user-email" class="block text-sm font-medium text-slate-700">Email:</label>
+                            <input type="email" id="user-email" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 sm:text-sm p-2" value="ampaulo@example.com">
+                        </div>
+                        <div>
+                            <label for="user-phone" class="block text-sm font-medium text-slate-700">Telefone:</label>
+                            <input type="tel" id="user-phone" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 sm:text-sm p-2" value="(99) 99999-9999">
+                        </div>
+                    </div>
+                    <button id="save-profile-btn" class="mt-8 w-full bg-teal-600 text-white font-semibold py-3 px-4 rounded-lg hover:bg-teal-700 transition">Salvar Meus Dados</button>
+                </div>
+            </div>
+
+            <!-- View: Hoje -->
+            <div id="hoje" class="view">
+                <div class="text-center mb-8">
+                    <h2 class="text-3xl font-bold text-teal-700" id="today-date"></h2>
+                    <p class="text-slate-500 mt-1" id="today-motivation"></p>
+                    <p class="text-slate-500 italic mt-1" id="today-verse"></p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Daily Schedule -->
+                    <div class="bg-white p-6 rounded-lg shadow-md lg:col-span-2">
+                        <h3 class="text-xl font-semibold mb-4 border-b pb-2">🗓️ Sua Rotina de Hoje</h3>
+                        <ul id="today-schedule" class="space-y-3 text-slate-600">
+                            <!-- JS will populate this -->
+                        </ul>
+                    </div>
+
+                    <!-- Daily Tracking -->
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="text-xl font-semibold mb-4 border-b pb-2">📝 Registro Diário</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <label for="sleep-quality" class="block text-sm font-medium text-slate-700">Qualidade do Sono (1-5)</label>
+                                <input type="number" min="1" max="5" id="sleep-quality" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 sm:text-sm p-2">
+                            </div>
+                             <div>
+                                <label for="mood-rating" class="block text-sm font-medium text-slate-700">Humor (1-5)</label>
+                                <input type="number" min="1" max="5" id="mood-rating" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 sm:text-sm p-2">
+                            </div>
+                             <div>
+                                <label for="effort-level" class="block text-sm font-medium text-slate-700">Nível de Esforço no Treino (1-5)</label>
+                                <input type="number" min="1" max="5" id="effort-level" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 sm:text-sm p-2">
+                            </div>
+                             <div>
+                                <label for="water-intake" class="block text-sm font-medium text-slate-700">Consumo de Água (Litros)</label>
+                                <input type="number" step="0.1" id="water-intake" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-teal-500 focus:ring-teal-500 sm:text-sm p-2">
+                            </div>
+                            <button class="w-full bg-teal-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-teal-700 transition">Salvar Registro</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- View: Amanhã -->
+            <div id="amanha" class="view">
+                <div class="text-center mb-8">
+                    <h2 class="text-3xl font-bold text-teal-700" id="tomorrow-date"></h2>
+                    <p class="text-slate-500 mt-1" id="tomorrow-motivation"></p>
+                    <p class="text-slate-500 italic mt-1" id="tomorrow-verse"></p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Daily Schedule -->
+                    <div class="bg-white p-6 rounded-lg shadow-md lg:col-span-2">
+                        <h3 class="text-xl font-semibold mb-4 border-b pb-2">🗓️ Sua Rotina de Amanhã</h3>
+                        <ul id="tomorrow-schedule" class="space-y-3 text-slate-600">
+                            <!-- JS will populate this -->
+                        </ul>
+                    </div>
+
+                    <!-- Daily Tracking Placeholder -->
+                    <div class="bg-white p-6 rounded-lg shadow-md flex items-center justify-center text-slate-500">
+                        <p>Acompanhamento de amanhã disponível amanhã!</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- View: Plano de Treino -->
+            <div id="treino" class="view">
+                <!-- JS will populate this -->
+            </div>
+
+            <!-- View: Plano de Corrida -->
+            <div id="corrida" class="view">
+                 <!-- Sub-navigation for running plans -->
+                <div class="flex flex-wrap justify-center items-center gap-2 py-2 mb-6 bg-white rounded-lg shadow-md">
+                    <button data-target="corrida-ampaulo" class="sub-nav-button active text-sm font-medium py-2 px-4 rounded-full bg-slate-200 text-slate-700 hover:bg-teal-500 hover:text-white">🏃‍♂️ Treino Ampaulo</button>
+                    <button data-target="corrida-eloisa" class="sub-nav-button text-sm font-medium py-2 px-4 rounded-full bg-slate-200 text-slate-700 hover:bg-teal-500 hover:text-white">🏃‍♀️ Treino Eloísa</button>
+                </div>
+
+                <!-- Content for Ampaulo's Running Plan -->
+                <div id="corrida-ampaulo" class="run-content-section active">
+                    <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                        <h3 class="text-xl font-bold text-slate-900 mb-4">Definições de Ritmo de Corrida (Pace Zones) - Ampaulo</h3>
+                        <div class="run-table-wrapper">
+                            <table class="run-table w-full text-sm text-left border-collapse">
+                                <thead>
+                                    <tr>
+                                        <th class="px-4 py-2">Zona</th>
+                                        <th class="px-4 py-2">Min/Km</th>
+                                        <th class="px-4 py-2">Max/Km</th>
+                                        <th class="px-4 py-2">Min Km/h</th>
+                                        <th class="px-4 py-2">Max Km/h</th>
+                                        <th class="px-4 py-2">Descrição</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pace-zones-ampaulo-body">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="space-y-8" id="treino-ampaulo-content">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Content for Eloísa's Running Plan -->
+                <div id="corrida-eloisa" class="run-content-section">
+                    <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                        <h3 class="text-xl font-bold text-slate-900 mb-4">Definições de Ritmo de Corrida (Pace Zones) - Eloísa</h3>
+                        <div class="run-table-wrapper">
+                            <table class="run-table w-full text-sm text-left border-collapse">
+                                <thead>
+                                    <tr>
+                                        <th class="px-4 py-2">Zona</th>
+                                        <th class="px-4 py-2">Min/Km</th>
+                                        <th class="px-4 py-2">Max/Km</th>
+                                        <th class="px-4 py-2">Min Km/h</th>
+                                        <th class="px-4 py-2">Max Km/h</th>
+                                        <th class="px-4 py-2">Descrição</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pace-zones-eloisa-body">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="space-y-8" id="treino-eloisa-content">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- View: Nutrição -->
+            <div id="nutricao" class="view">
+                 <!-- JS will populate this -->
+            </div>
+
+            <!-- View: Progresso -->
+            <div id="progresso" class="view">
+                <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                    <h2 class="text-3xl font-bold text-teal-700 mb-4 text-center">📊 Acompanhamento do Progresso</h2>
+                    <p class="text-slate-600 mb-6 text-center">Edite os dados diretamente na tabela abaixo. Clique em "Gerar Gráficos" para visualizar suas mudanças.</p>
+
+                    <div class="overflow-x-auto mb-6">
+                        <table id="progress-table" class="run-table w-full text-sm text-left border-collapse">
+                            <thead>
+                                <tr>
+                                    <th class="px-4 py-2">Data</th>
+                                    <th class="px-4 py-2">Peso (kg)</th>
+                                    <th class="px-4 py-2">% Gordura</th>
+                                    <th class="px-4 py-2">Massa G. (kg)</th>
+                                    <th class="px-4 py-2">Massa L.G. (kg)</th>
+                                    <th class="px-4 py-2">Cintura (cm)</th>
+                                    <th class="px-4 py-2">Abdômen (cm)</th>
+                                    <th class="px-4 py-2">Tricipital (mm)</th>
+                                    <th class="px-4 py-2">Abdominal (mm)</th>
+                                    <th class="px-4 py-2">Subescapular (mm)</th>
+                                    <th class="px-4 py-2">Axilar Média (mm)</th>
+                                    <th class="px-4 py-2">Torácica (mm)</th>
+                                    <th class="px-4 py-2">Suprailíaca (mm)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Data will be populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="flex flex-wrap justify-center gap-4 mt-6">
+                        <button id="add-progress-row-btn" class="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition">Adicionar Nova Entrada</button>
+                        <button id="remove-progress-row-btn" class="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition">Remover Última Entrada</button>
+                        <button id="generate-charts-btn" class="bg-teal-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-teal-700 transition">Gerar Gráficos</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="text-xl font-semibold mb-4 text-center">Peso e % de Gordura</h3>
+                        <div class="chart-container">
+                            <canvas id="weightFatChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="text-xl font-semibold mb-4 text-center">Composição Corporal (Massa)</h3>
+                         <div class="chart-container">
+                            <canvas id="bodyCompositionChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="text-xl font-semibold mb-4 text-center">Circunferências (Cintura e Abdômen)</h3>
+                         <div class="chart-container">
+                            <canvas id="circumferenceChart"></canvas>
+                        </div>
+                    </div>
+                     <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="text-xl font-semibold mb-4 text-center">Evolução das Dobras Cutâneas</h3>
+                         <div class="chart-container">
+                            <canvas id="skinfoldChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- View: Calendário -->
+            <div id="calendario" class="view">
+                 <!-- JS will populate this -->
+            </div>
+
+            <!-- View: Finanças -->
+            <div id="financas" class="view">
+                <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                    <h2 class="text-3xl font-bold text-teal-700 mb-4 text-center">💰 Suas Obrigações Financeiras</h2>
+                    <p class="text-slate-600 mb-6 text-center">Aqui você encontra os detalhes dos seus pagamentos e recebimentos mensais.</p>
+
+                    <div class="space-y-8">
+                        <div>
+                            <h3 class="text-xl font-semibold mb-4 border-b pb-2">💸 Contas a Pagar Fixas Mensais (Vencimentos)</h3>
+                            <div class="overflow-x-auto">
+                                <table class="run-table w-full text-sm text-left border-collapse">
+                                    <thead>
+                                        <tr>
+                                            <th class="px-4 py-2">Obrigação</th>
+                                            <th class="px-4 py-2">Dia do Mês</th>
+                                            <th class="px-4 py-2">Valor (R$)</th>
+                                            <th class="px-4 py-2">Observação</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="fixed-payments-body">
+                                        <!-- Populated by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 class="text-xl font-semibold mb-4 border-b pb-2">💳 Informações de Cartão de Crédito</h3>
+                            <div class="overflow-x-auto">
+                                <table class="run-table w-full text-sm text-left border-collapse">
+                                    <thead>
+                                        <tr>
+                                            <th class="px-4 py-2">Cartão</th>
+                                            <th class="px-4 py-2">Dia de Vencimento</th>
+                                            <th class="px-4 py-2">Dia de Fechamento</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="credit-card-info-body">
+                                        <!-- Populated by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 class="text-xl font-semibold mb-4 border-b pb-2">💰 Recebimentos (Próximos 12 Meses)</h3>
+                            <div class="overflow-x-auto">
+                                <table class="run-table w-full text-sm text-left border-collapse">
+                                    <thead>
+                                        <tr>
+                                            <th class="px-4 py-2">Mês/Ano</th>
+                                            <th class="px-4 py-2">Salário (5º dia útil)</th>
+                                            <th class="px-4 py-2">Adiantamento (Dia 20)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="salary-advance-body">
+                                        <!-- Populated by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Modal for Calendar -->
+    <div id="calendar-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center">
+        <div class="bg-white rounded-lg shadow-xl p-6 m-4 max-w-lg w-full transform transition-all scale-95 opacity-0" id="modal-content">
+            <h3 id="modal-title" class="text-xl font-bold text-teal-700"></h3>
+            <p id="modal-activity" class="text-slate-600 mt-2"></p>
+            <p id="modal-motivation" class="text-slate-500 mt-4"></p>
+            <p id="modal-verse-ref" class="text-slate-500 italic mt-2"></p>
+            <div id="modal-verse-text" class="text-slate-700 mt-2 text-sm hidden"> <!-- Hidden as per user request -->
+                <div class="spinner mx-auto hidden"></div>
+                <p id="verse-content"></p>
+            </div>
+            <div id="modal-finances" class="mt-4 pt-4 border-t border-slate-200">
+                <h4 class="font-semibold text-slate-700 mb-2">Obrigações Financeiras:</h4>
+                <ul id="modal-finances-list" class="list-disc list-inside text-slate-600">
+                    <!-- Finance details will be populated here -->
+                </ul>
+            </div>
+            <button id="modal-close" class="mt-6 w-full bg-teal-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-teal-700 transition">Fechar</button>
+        </div>
+    </div>
+
+    <script>
+        // --- APP LOGIC ---
+        // Mapping for Bible book abbreviations for bibliaonline.com.br
+        const bookAbbreviations = {
+            "Provérbios": "pv",
+            "Salmos": "sl",
+            "Romanos": "rm",
+            "Filipenses": "fp",
+            "Hebreus": "hb",
+            "Josué": "js",
+            "1 Coríntios": "1co",
+            "Gálatas": "gl",
+            "Mateus": "mt",
+            "2 Timóteo": "2tm",
+            "Colossenses": "cl",
+            "Lucas": "lc",
+            "1 Tessalonicenses": "1ts",
+            "1 Pedro": "1pe",
+            "Isaías": "is",
+            "Efésios": "ef",
+            "Tiago": "tg",
+            "João": "jo",
+            // Add more as needed
+        };
+
+        // Function to fetch Bible verse text (kept for reference, but not used in modal display)
+        async function getBibleVerseText(verseReference) {
+            if (!verseReference) return null;
+
+            const parts = verseReference.match(/(\d?\s?[A-Za-zÀ-ÖØ-öø-ÿ]+)\s(\d+):(\d+)/);
+            if (!parts) {
+                console.warn("Formato de versículo inválido:", verseReference);
+                return null;
+            }
+
+            let bookName = parts[1].trim();
+            const chapter = parts[2];
+            const verse = parts[3];
+
+            // Handle "1 Coríntios" -> "1co", "2 Timóteo" -> "2tm" etc.
+            if (bookName.startsWith("1 ") || bookName.startsWith("2 ") || bookName.startsWith("3 ")) {
+                const num = bookName.substring(0, 1);
+                const baseName = bookName.substring(2).trim();
+                const abbrev = bookAbbreviations[baseName];
+                if (abbrev) {
+                    bookName = num + abbrev;
+                } else {
+                    console.warn(`Abreviação não encontrada para o livro: ${baseName}`);
+                    return null;
+                }
+            } else {
+                bookName = bookAbbreviations[bookName];
+                if (!bookName) {
+                    console.warn(`Abreviação não encontrada para o livro: ${parts[1].trim()}`);
+                    return null;
+                }
+            }
+
+
+            const url = `https://www.bibliaonline.com.br/acf/${bookName}/${chapter}/${verse}`;
+            console.log("Fetching Bible verse from:", url);
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const html = await response.text();
+
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+
+                // The verse text is typically within a p tag with class "version-text"
+                const verseElement = doc.querySelector('p.version-text');
+                if (verseElement) {
+                    // Remove any child elements like <sup> for verse numbers
+                    Array.from(verseElement.children).forEach(child => child.remove());
+                    return verseElement.textContent.trim();
+                } else {
+                    console.warn("Elemento do versículo não encontrado na página:", url);
+                    return "Versículo não encontrado ou erro ao carregar.";
+                }
+            } catch (error) {
+                console.error("Erro ao buscar o versículo da Bíblia:", error);
+                return "Erro ao carregar o versículo.";
+            }
+        }
+
+
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM Content Loaded!'); // Log para depuração
+            const views = document.querySelectorAll('.view');
+            const navButtons = document.querySelectorAll('.nav-button');
+
+            // --- Navigation ---
+            navButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const targetId = button.dataset.target;
+                    console.log(`Navigating to: ${targetId} view`); // Log para depuração
+
+                    navButtons.forEach(btn => btn.classList.remove('active'));
+                    button.classList.add('active');
+
+                    views.forEach(view => {
+                        view.classList.remove('active');
+                        if (view.id === targetId) {
+                            view.classList.add('active');
+                        }
+                    });
+
+                    // Lazy load charts only if progresso is clicked and charts haven't been initialized
+                    if(targetId === 'progresso' && !document.getElementById('weightFatChart').__chartjs__) {
+                        initCharts();
+                    }
+                    if (targetId === 'home') {
+                        populateUserProfileForm();
+                    }
+                });
+            });
+
+            // --- Initial Load ---
+            // Firebase will trigger loading of user profile and progress data
+            // once authenticated, which will then trigger rendering functions.
+            document.addEventListener('firebaseAuthReady', () => {
+                console.log('Firebase Auth Ready. Initializing views...'); // Log para depuração
+                initHomeView(); // Initialize Home view after profile load
+                initTodayView();
+                initTomorrowView(); // Initialize Tomorrow view
+                initWorkoutsView();
+                initRunsView(); // This will now handle sub-navigation
+                initNutritionView();
+                initCalendarView();
+                initFinancesView(); // Initialize the new Finances view
+                renderProgressTable(); // Render table initially with default/loaded data
+            });
+
+
+            // --- Accordion Logic ---
+            document.body.addEventListener('click', function(e) {
+                if (e.target.matches('.workout-accordion-button') || e.target.closest('.workout-accordion-button')) {
+                    const button = e.target.matches('.workout-accordion-button') ? e.target : e.target.closest('.workout-accordion-button');
+                    button.classList.toggle('open');
+                } else if (e.target.matches('.group-accordion-button') || e.target.closest('.group-accordion-button')) {
+                    const button = e.target.matches('.group-accordion-button') ? e.target : e.target.closest('.group-accordion-button');
+                    button.classList.toggle('open');
+                }
+            });
+
+            // --- Calendar Modal Logic ---
+            const calendarModal = document.getElementById('calendar-modal');
+            const calendarModalContent = document.getElementById('modal-content');
+            const calendarModalClose = document.getElementById('modal-close');
+            const modalVerseRef = document.getElementById('modal-verse-ref');
+            const modalVerseText = document.getElementById('modal-verse-text');
+            const verseContent = document.getElementById('verse-content');
+            const verseSpinner = modalVerseText.querySelector('.spinner');
+
+
+            document.body.addEventListener('click', async function(e) { // Made async to await getBibleVerseText
+                 if (e.target.matches('.calendar-day')) {
+                    const dayData = window.projectData.calendar[parseInt(e.target.dataset.day) - 1];
+                    document.getElementById('modal-title').textContent = `${e.target.dataset.day} de Julho, ${dayData.weekday}`; // Updated month
+                    document.getElementById('modal-activity').innerHTML = `Atividade: ${dayData.activity}`; // Use innerHTML for <br>
+                    document.getElementById('modal-motivation').textContent = dayData.msg ? `"${dayData.msg}"` : "";
+
+                    // Display verse reference, but do not fetch or display full text
+                    modalVerseRef.textContent = dayData.verse ? `"${dayData.verse}"` : "";
+                    verseContent.textContent = ""; // Clear any previous verse content
+                    verseSpinner.classList.add('hidden'); // Ensure spinner is hidden
+                    modalVerseText.classList.add('hidden'); // Ensure the text container is hidden
+
+                    // Populate financial obligations for the day
+                    const financeList = document.getElementById('modal-finances-list');
+                    financeList.innerHTML = '';
+                    const currentDay = parseInt(e.target.dataset.day);
+                    const currentMonth = new Date().getMonth(); // July is 6
+                    const currentYear = new Date().getFullYear(); // 2025
+
+                    const todayDate = new Date(currentYear, currentMonth, currentDay);
+
+                    const obligationsToday = window.projectData.finances.billPayments.filter(bill => bill.day === currentDay);
+                    if (obligationsToday.length > 0) {
+                        obligationsToday.forEach(bill => {
+                            const li = document.createElement('li');
+                            li.textContent = `${bill.name} (Vencimento)`;
+                            financeList.appendChild(li);
+                        });
+                    }
+
+                    // Check for salary and advance payment
+                    const salaryDate = getNthBusinessDay(currentYear, currentMonth, window.projectData.finances.salaryDetails.salaryDay, true); // 5th business day, including Saturday
+                    if (salaryDate && salaryDate.getDate() === currentDay) {
+                        const li = document.createElement('li');
+                        li.textContent = `Recebimento de Salário!`;
+                        financeList.appendChild(li);
+                    }
+
+                    const advancePaymentDate = getNextBusinessDay(new Date(currentYear, currentMonth, window.projectData.finances.salaryDetails.advanceDay));
+                    if (advancePaymentDate && advancePaymentDate.getDate() === currentDay) {
+                        const li = document.createElement('li');
+                        li.textContent = `Recebimento de Adiantamento!`;
+                        financeList.appendChild(li);
+                    }
+
+                    if (financeList.children.length === 0) {
+                        const li = document.createElement('li');
+                        li.textContent = 'Nenhuma obrigação financeira para este dia.';
+                        financeList.appendChild(li);
+                    }
+
+
+                    calendarModal.classList.remove('hidden');
+                    calendarModal.classList.add('flex');
+                    setTimeout(() => {
+                       calendarModalContent.classList.remove('scale-95', 'opacity-0');
+                    }, 10);
+                }
+            });
+
+            const closeCalendarModal = () => {
+                calendarModalContent.classList.add('scale-95', 'opacity-0');
+                setTimeout(() => {
+                    calendarModal.classList.add('hidden');
+                    calendarModal.classList.remove('flex');
+                }, 200);
+            };
+
+            calendarModalClose.addEventListener('click', closeCalendarModal);
+            calendarModal.addEventListener('click', (e) => {
+                if (e.target === calendarModal) {
+                    closeCalendarModal();
+                }
+            });
+
+            // --- Home View Event Listeners ---
+            document.getElementById('save-profile-btn').addEventListener('click', () => {
+                window.userProfile.name = document.getElementById('user-name').value;
+                window.userProfile.gender = document.getElementById('user-gender').value;
+                window.userProfile.dob = document.getElementById('user-dob').value;
+                window.userProfile.height = parseFloat(document.getElementById('user-height').value);
+                window.userProfile.currentWeight = parseFloat(document.getElementById('user-current-weight').value);
+                window.userProfile.idealWeight = parseFloat(document.getElementById('user-ideal-weight').value);
+                window.userProfile.email = document.getElementById('user-email').value;
+                window.userProfile.phone = document.getElementById('user-phone').value;
+                window.saveUserProfileToFirestore();
+            });
+
+            // --- Progress View Event Listeners ---
+            document.getElementById('add-progress-row-btn').addEventListener('click', addProgressRow);
+            document.getElementById('remove-progress-row-btn').addEventListener('click', removeProgressRow);
+            document.getElementById('generate-charts-btn').addEventListener('click', initCharts);
+
+        });
+
+        // Function to populate user profile form from window.userProfile
+        function populateUserProfileForm() {
+            try {
+                document.getElementById('user-name').value = window.userProfile.name;
+                document.getElementById('user-gender').value = window.userProfile.gender;
+                document.getElementById('user-dob').value = window.userProfile.dob;
+                document.getElementById('user-height').value = window.userProfile.height;
+                document.getElementById('user-current-weight').value = window.userProfile.currentWeight;
+                window.userProfile.idealWeight = parseFloat(document.getElementById('user-ideal-weight').value);
+                document.getElementById('user-email').value = window.userProfile.email;
+                document.getElementById('user-phone').value = window.userProfile.phone;
+                console.log("Perfil do usuário populado no formulário."); // Log para depuração
+            } catch (e) {
+                console.error("Erro ao popular formulário de perfil do usuário:", e);
+            }
+        }
+
+        // --- View Initialization Functions ---
+
+        function initHomeView() {
+            console.log('Initializing Home View...'); // Log para depuração
+            populateUserProfileForm();
+        }
+
+        function initTodayView() {
+            console.log('Initializing Today View...'); // Log para depuração
+            try {
+                const today = new Date(); // Get current date
+                const dayOfMonth = today.getDate();
+                const weekdayIndex = today.getDay(); // 0 for Sunday, 1 for Monday...
+
+                const weekdays = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
+                const weekdayName = weekdays[weekdayIndex];
+
+                document.getElementById('today-date').textContent = `${weekdayName}, ${dayOfMonth} de Julho`;
+
+                const todayData = window.projectData.calendar.find(d => d.day === dayOfMonth); // Find based on day
+                document.getElementById('today-motivation').textContent = todayData ? (todayData.msg || "Mantenha o foco e a disciplina.") : "Mantenha o foco e a disciplina.";
+                document.getElementById('today-verse').textContent = todayData && todayData.verse ? `"${todayData.verse}"` : "";
+
+                const todayScheduleData = window.projectData.weeklySchedule.find(d => d.day === weekdayName);
+                const scheduleList = document.getElementById('today-schedule');
+                scheduleList.innerHTML = '';
+                if (todayScheduleData && todayScheduleData.schedule.length > 0) {
+                     todayScheduleData.schedule.forEach(item => {
+                        const li = document.createElement('li');
+                        li.className = 'flex items-center gap-4';
+                        li.innerHTML = `<span class="bg-teal-100 text-teal-700 text-xs font-semibold px-2.5 py-0.5 rounded-full">${item.time}</span><span>${item.task}</span>`;
+                        scheduleList.appendChild(li);
+                    });
+                } else {
+                    scheduleList.innerHTML = '<li>Dia de descanso ou atividades flexíveis. Aproveite!</li>';
+                }
+
+                // Add financial obligations to Today's schedule
+                const currentMonth = today.getMonth();
+                const currentYear = today.getFullYear();
+
+                const obligationsToday = window.projectData.finances.billPayments.filter(bill => bill.day === dayOfMonth);
+                if (obligationsToday.length > 0) {
+                    const liHeader = document.createElement('li');
+                    liHeader.className = 'font-bold text-red-700 mt-4';
+                    liHeader.textContent = '🚨 Obrigações Financeiras:';
+                    scheduleList.appendChild(liHeader);
+                    obligationsToday.forEach(bill => {
+                        const li = document.createElement('li');
+                        li.className = 'flex items-center gap-4 text-red-600';
+                        li.innerHTML = `<span class="bg-red-100 text-red-700 text-xs font-semibold px-2.5 py-0.5 rounded-full">Dia ${bill.day}</span><span>${bill.name} (Vencimento)</span>`;
+                        scheduleList.appendChild(li);
+                    });
+                }
+
+                const salaryDate = getNthBusinessDay(currentYear, currentMonth, window.projectData.finances.salaryDetails.salaryDay, true);
+                if (salaryDate && salaryDate.getDate() === dayOfMonth) {
+                    const li = document.createElement('li');
+                    li.className = 'flex items-center gap-4 text-green-700 font-semibold mt-2';
+                    li.innerHTML = `<span class="bg-green-100 text-green-700 text-xs font-semibold px-2.5 py-0.5 rounded-full">Recebimento</span><span>💰 Salário!</span>`;
+                    scheduleList.appendChild(li);
+                }
+
+                const advancePaymentDate = getNextBusinessDay(new Date(currentYear, currentMonth, window.projectData.finances.salaryDetails.advanceDay));
+                if (advancePaymentDate && advancePaymentDate.getDate() === dayOfMonth) {
+                    const li = document.createElement('li');
+                    li.className = 'flex items-center gap-4 text-green-700 font-semibold mt-2';
+                    li.innerHTML = `<span class="bg-green-100 text-green-700 text-xs font-semibold px-2.5 py-0.5 rounded-full">Recebimento</span><span>💵 Adiantamento!</span>`;
+                    scheduleList.appendChild(li);
+                }
+
+            } catch (e) {
+                console.error("Erro ao inicializar a vista 'Hoje':", e);
+            }
+        }
+
+        function initTomorrowView() {
+            console.log('Initializing Tomorrow View...'); // Log para depuração
+            try {
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1); // Get tomorrow's date
+                const dayOfMonth = tomorrow.getDate();
+                const weekdayIndex = tomorrow.getDay();
+
+                const weekdays = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
+                const weekdayName = weekdays[weekdayIndex];
+
+                document.getElementById('tomorrow-date').textContent = `${weekdayName}, ${dayOfMonth} de Julho`;
+
+                const tomorrowData = window.projectData.calendar.find(d => d.day === dayOfMonth); // Find based on day
+                document.getElementById('tomorrow-motivation').textContent = tomorrowData ? (tomorrowData.msg || "Prepare-se para mais um dia de sucesso!") : "Prepare-se para mais um dia de sucesso!";
+                document.getElementById('tomorrow-verse').textContent = tomorrowData && tomorrowData.verse ? `"${tomorrowData.verse}"` : "";
+
+                const tomorrowScheduleData = window.projectData.weeklySchedule.find(d => d.day === weekdayName);
+                const scheduleList = document.getElementById('tomorrow-schedule');
+                scheduleList.innerHTML = '';
+                if (tomorrowScheduleData && tomorrowScheduleData.schedule.length > 0) {
+                     tomorrowScheduleData.schedule.forEach(item => {
+                        const li = document.createElement('li');
+                        li.className = 'flex items-center gap-4';
+                        li.innerHTML = `<span class="bg-teal-100 text-teal-700 text-xs font-semibold px-2.5 py-0.5 rounded-full">${item.time}</span><span>${item.task}</span>`;
+                        scheduleList.appendChild(li);
+                    });
+                } else {
+                    scheduleList.innerHTML = '<li>Dia de descanso ou atividades flexíveis. Aproveite!</li>';
+                }
+
+                // Add financial obligations to Tomorrow's schedule
+                const currentMonth = tomorrow.getMonth();
+                const currentYear = tomorrow.getFullYear();
+
+                const obligationsTomorrow = window.projectData.finances.billPayments.filter(bill => bill.day === dayOfMonth);
+                if (obligationsTomorrow.length > 0) {
+                    const liHeader = document.createElement('li');
+                    liHeader.className = 'font-bold text-red-700 mt-4';
+                    liHeader.textContent = '🚨 Obrigações Financeiras:';
+                    scheduleList.appendChild(liHeader);
+                    obligationsTomorrow.forEach(bill => {
+                        const li = document.createElement('li');
+                        li.className = 'flex items-center gap-4 text-red-600';
+                        li.innerHTML = `<span class="bg-red-100 text-red-700 text-xs font-semibold px-2.5 py-0.5 rounded-full">Dia ${bill.day}</span><span>${bill.name} (Vencimento)</span>`;
+                        scheduleList.appendChild(li);
+                    });
+                }
+
+                const salaryDate = getNthBusinessDay(currentYear, currentMonth, window.projectData.finances.salaryDetails.salaryDay, true);
+                if (salaryDate && salaryDate.getDate() === dayOfMonth) {
+                    const li = document.createElement('li');
+                    li.className = 'flex items-center gap-4 text-green-700 font-semibold mt-2';
+                    li.innerHTML = `<span class="bg-green-100 text-green-700 text-xs font-semibold px-2.5 py-0.5 rounded-full">Recebimento</span><span>💰 Salário!</span>`;
+                    scheduleList.appendChild(li);
+                }
+
+                const advancePaymentDate = getNextBusinessDay(new Date(currentYear, currentMonth, window.projectData.finances.salaryDetails.advanceDay));
+                if (advancePaymentDate && advancePaymentDate.getDate() === dayOfMonth) {
+                    const li = document.createElement('li');
+                    li.className = 'flex items-center gap-4 text-green-700 font-semibold mt-2';
+                    li.innerHTML = `<span class="bg-green-100 text-green-700 text-xs font-semibold px-2.5 py-0.5 rounded-full">Recebimento</span><span>💵 Adiantamento!</span>`;
+                    scheduleList.appendChild(li);
+                }
+
+            } catch (e) {
+                console.error("Erro ao inicializar a vista 'Amanhã':", e);
+            }
+        }
+
+        function initWorkoutsView() {
+            console.log('Initializing Workouts View...'); // Log para depuração
+            const container = document.getElementById('treino');
+            if (!container) {
+                console.error("Container #treino não encontrado!");
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="space-y-6">
+                    <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                        <h2 class="text-2xl font-bold text-teal-700 mb-4 text-center">🏋️‍♂️ Resumo de Séries Semanais – Projeto Ampaulo</h2>
+                        <div class="overflow-x-auto mb-6">
+                            <h3 class="text-xl font-semibold mb-2">✅ SÉRIES POR DIA (Atualizado e Otimizado)</h3>
+                            <table class="run-table w-full text-sm text-left border-collapse">
+                                <thead>
+                                    <tr>
+                                        <th class="px-4 py-2">📅 Dia</th>
+                                        <th class="px-4 py-2">💪 Treino</th>
+                                        <th class="px-4 py-2">🔢 Séries Detalhadas</th>
+                                        <th class="px-4 py-2">📊 Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td class="px-4 py-2">Quarta</td>
+                                        <td class="px-4 py-2">Inferiores B</td>
+                                        <td class="px-4 py-2">12 (Quadríceps) + 12 (Core/Abdômen) + 4 (Lombar)</td>
+                                        <td class="px-4 py-2">28 séries</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="px-4 py-2">Sexta</td>
+                                        <td class="px-4 py-2">Peito + Tríceps</td>
+                                        <td class="px-4 py-2">18 (Peitoral) + 9 (Tríceps)</td>
+                                        <td class="px-4 py-2">27 séries</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="px-4 py-2">Sábado</td>
+                                        <td class="px-4 py-2">Ombros + Trapézio</td>
+                                        <td class="px-4 py-2">18 (Ombros) + 9 (Trapézio)</td>
+                                        <td class="px-4 py-2">27 séries</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="px-4 py-2">Domingo</td>
+                                        <td class="px-4 py-2">Inferiores A</td>
+                                        <td class="px-4 py-2">6 (Glúteos) + 6 (Posterior de Coxa) + 6 (Panturrilhas) + 12 (Core/Abdômen)</td>
+                                        <td class="px-4 py-2">30 séries</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="px-4 py-2">Segunda</td>
+                                        <td class="px-4 py-2">Costas + Antebraço + Bíceps</td>
+                                        <td class="px-4 py-2">20 (Costas) + 4 (Antebraço) + 6 (Bíceps)</td>
+                                        <td class="px-4 py-2">30 séries</td>
+                                    </tr>
+                                    <tr class="font-bold bg-slate-100">
+                                        <td class="px-4 py-2" colspan="3">🧮 TOTAL SEMANAL DE SÉRIES DE MUSCULAÇÃO</td>
+                                        <td class="px-4 py-2">🟩 142 séries por semana</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <h3 class="text-xl font-semibold mb-2">✅ Distribuição por Grupo Muscular (Total Semanal)</h3>
+                            <table class="run-table w-full text-sm text-left border-collapse">
+                                <thead>
+                                    <tr>
+                                        <th class="px-4 py-2">💥 Grupo Muscular</th>
+                                        <th class="px-4 py-2">🔢 Séries Semanais</th>
+                                        <th class="px-4 py-2">🧠 Observação Técnica</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td class="px-4 py-2">Quadríceps</td><td class="px-4 py-2">12 séries</td><td class="px-4 py-2">Excelente para volume, foco na frente da coxa.</td></tr>
+                                    <tr><td class="px-4 py-2">Posterior de Coxa</td><td class="px-4 py-2">6 séries</td><td class="px-4 py-2">Mantém equilíbrio funcional com o quadríceps.</td></tr>
+                                    <tr><td class="px-4 py-2">Glúteos</td><td class="px-4 py-2">6 séries</td><td class="px-4 py-2">Hip Thrust + Terra garantem ativação completa.</td></tr>
+                                    <tr><td class="px-4 py-2">Panturrilhas</td><td class="px-4 py-2">6 séries</td><td class="px-4 py-2">Frequência ideal, com estímulo direto e variado.</td></tr>
+                                    <tr><td class="px-4 py-2">Core/Abdômen</td><td class="px-4 py-2">24 séries (12 + 12)</td><td class="px-4 py-2">Volume elevado para performance na corrida.</td></tr>
+                                    <tr><td class="px-4 py-2">Lombar</td><td class="px-4 py-2">4 séries</td><td class="px-4 py-2">Essencial para proteção de coluna e postura.</td></tr>
+                                    <tr><td class="px-4 py-2">Peitoral</td><td class="px-4 py-2">18 séries</td><td class="px-4 py-2">Alta eficiência com volume adequado.</td></tr>
+                                    <tr><td class="px-4 py-2">Tríceps</td><td class="px-4 py-2">9 séries</td><td class="px-4 py-2">Equilibrado com o peitoral.</td></tr>
+                                    <tr><td class="px-4 py-2">Ombros</td><td class="px-4 py-2">18 séries</td><td class="px-4 py-2">Foco em deltoides anterior, medial e posterior.</td></tr>
+                                    <tr><td class="px-4 py-2">Trapézio</td><td class="px-4 py-2">9 séries</td><td class="px-4 py-2">Equilibrado, com variação de cargas e movimentos.</td></tr>
+                                    <tr><td class="px-4 py-2">Costas</td><td class="px-4 py-2">20 séries</td><td class="px-4 py-2">Volume ideal para força, amplitude e largura.</td></tr>
+                                    <tr><td class="px-4 py-2">Antebraço</td><td class="px-4 py-2">4 séries</td><td class="px-4 py-2">Suporte funcional para pegadas e resistência.</td></tr>
+                                    <tr><td class="px-4 py-2">Bíceps</td><td class="px-4 py-2">6 séries</td><td class="px-4 py-2">Boa estimulação, alinhado ao trabalho de costas.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+            const workoutContainer = container.querySelector('.space-y-6');
+            if (!workoutContainer) {
+                console.error("workoutContainer não encontrado!");
+                return;
+            }
+
+            try {
+                // Add individual workout details below the summary tables
+                // Ensure the order matches the desired display order (Quarta, Sexta, Sábado, Domingo, Segunda)
+                const workoutOrder = ['quarta_inferiores_b', 'sexta_peito_triceps', 'sabado_ombros_trapezio', 'domingo_inferiores_a', 'segunda_costas_antebraco_biceps'];
+
+                workoutOrder.forEach(key => {
+                    const workout = window.projectData.workouts[key];
+                    if (!workout) return; // Skip if workout not found (shouldn't happen with fixed keys)
+
+                    const workoutHTML = `
+                        <div class="bg-white p-6 rounded-lg shadow-md">
+                            <button class="workout-accordion-button w-full text-left">
+                                <div class="flex justify-between items-center">
+                                    <h3 class="text-xl font-bold text-slate-900">${workout.title} <span class="text-sm font-normal text-slate-500">(${workout.series} séries)</span></h3>
+                                    <span class="text-teal-500 transform transition-transform">▼</span>
+                                </div>
+                                <p class="text-slate-500 mt-1">${workout.objective}</p>
+                            </button>
+                            <div class="workout-accordion-content mt-4 border-t pt-4">
+                                ${workout.groups.map(group => `
+                                    <div class="mb-4">
+                                        <button class="group-accordion-button w-full text-left flex justify-between items-center">
+                                            <h4 class="font-semibold text-lg text-teal-700">${group.name} <span class="text-sm font-normal text-slate-500">(${group.series} séries)</span></h4>
+                                            <span class="text-teal-400 transform transition-transform">▶</span>
+                                        </button>
+                                        <div class="group-accordion-content mt-2">
+                                            <ul class="space-y-3">
+                                                ${group.exercises.map(ex => `
+                                                    <li class="p-3 bg-slate-50 rounded-md">
+                                                        <p class="font-semibold">${ex.name} <span class="font-normal text-slate-500">- ${ex.sets}</span></p>
+                                                        <p class="text-sm text-slate-600 mt-1">${ex.howto}</p>
+                                                    </li>
+                                                `).join('')}
+                                            </ul>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                    workoutContainer.innerHTML += workoutHTML;
+                });
+            } catch (e) {
+                console.error("Erro ao renderizar HTML dos treinos:", e);
+            }
+        }
+
+        function initRunsView() {
+            console.log('Initializing Runs View...'); // Log para depuração
+            const container = document.getElementById('corrida');
+            if (!container) {
+                console.error("Container #corrida não encontrado!");
+                return;
+            }
+
+            // Function to render pace zones table
+            const renderPaceZonesTable = (targetBodyId, paceData) => {
+                const tableBody = document.getElementById(targetBodyId);
+                if (!tableBody) {
+                    console.error(`Table body ${targetBodyId} not found!`);
+                    return '';
+                }
+                tableBody.innerHTML = paceData.map(zone => `
+                    <tr class="border-b border-gray-200">
+                        <td class="px-4 py-2"><strong>${zone.name}</strong></td>
+                        <td class="px-4 py-2">${zone.min_km}</td>
+                        <td class="px-4 py-2">${zone.max_km}</td>
+                        <td class="px-4 py-2">${zone.min_kmh}</td>
+                        <td class="px-4 py-2">${zone.max_kmh}</td>
+                        <td class="px-4 py-2">${zone.description}</td>
+                    </tr>
+                `).join('');
+            };
+
+            // Function to render running workouts
+            const renderRunningWorkouts = (targetContentId, workouts, isAmpaulo) => {
+                const contentDiv = document.getElementById(targetContentId);
+                if (!contentDiv) {
+                    console.error(`Content div ${targetContentId} not found!`);
+                    return '';
+                }
+                contentDiv.innerHTML = workouts.map(key => {
+                    const run = window.projectData.runs[key];
+                    if (!run) return '';
+
+                    let tableHeaders = '';
+                    let tableRows = '';
+
+                    if (isAmpaulo) {
+                        tableHeaders = `
+                            <tr>
+                                <th class="px-4 py-2">Km</th>
+                                <th class="px-4 py-2">Etapa</th>
+                                <th class="px-4 py-2">Pace Alvo</th>
+                                <th class="px-4 py-2">Zona</th>
+                                <th class="px-4 py-2">Tempo Estimado</th>
+                                <th class="px-4 py-2">Observações</th>
+                            </tr>
+                        `;
+                        tableRows = run.stages.map(stage => `
+                            <tr class="border-b border-gray-200">
+                                <td class="px-4 py-2 font-medium">${stage.km}</td>
+                                <td class="px-4 py-2">${stage.name}</td>
+                                <td class="px-4 py-2">${stage.pace}</td>
+                                <td class="px-4 py-2">${stage.zone}</td>
+                                <td class="px-4 py-2">${stage.estimated_time}</td>
+                                <td class="px-4 py-2">${stage.observations}</td>
+                            </tr>
+                        `).join('');
+                    } else {
+                        tableHeaders = `
+                            <tr>
+                                <th class="px-4 py-2">Etapa</th>
+                                <th class="px-4 py-2">Duração</th>
+                                <th class="px-4 py-2">Ritmo</th>
+                            </tr>
+                        `;
+                        tableRows = run.stages.map(stage => `
+                            <tr class="border-b border-gray-200">
+                                <td class="px-4 py-2 font-medium">${stage.name}</td>
+                                <td class="px-4 py-2">${stage.duration}</td>
+                                <td class="px-4 py-2">${stage.pace}</td>
+                            </tr>
+                        `).join('');
+                    }
+
+                    return `
+                        <div class="bg-slate-50 p-6 rounded-lg shadow-md flex flex-col">
+                            <h3 class="text-xl font-bold text-slate-900 mb-4">${run.title}</h3>
+                            ${isAmpaulo ? `<p class="text-slate-600 mb-2"><strong>Horário:</strong> ${run.schedule}</p>` : ''}
+                            ${isAmpaulo ? `<p class="text-slate-600 mb-2"><strong>Objetivo:</strong> ${run.objective}</p>` : ''}
+                            ${isAmpaulo ? `<p class="text-slate-600 mb-4"><strong>Distância Estimada:</strong> ${run.estimated_distance}</p>` : ''}
+                            <div class="overflow-x-auto flex-grow">
+                                <table class="run-table w-full text-sm text-left">
+                                    <thead class="bg-slate-100">
+                                        ${tableHeaders}
+                                    </thead>
+                                    <tbody>
+                                        ${tableRows}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="mt-4 pt-4 border-t flex justify-between font-semibold">
+                                <span>Total:</span>
+                                <span>${run.total.duration} / ~${run.total.distance}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            };
+
+            // Initial rendering for Ampaulo's content
+            renderPaceZonesTable('pace-zones-ampaulo-body', window.projectData.runs.paceDefinitionsAmpaulo);
+            // Changed the layout for Ampaulo's workouts from grid to stacked
+            document.getElementById('treino-ampaulo-content').classList.remove('grid', 'grid-cols-1', 'md:grid-cols-2', 'lg:grid-cols-3', 'gap-6');
+            document.getElementById('treino-ampaulo-content').classList.add('space-y-8');
+            renderRunningWorkouts('treino-ampaulo-content', ['leve', 'intervalada', 'longa'], true); // Pass true for Ampaulo
+
+            // Initial rendering for Eloísa's content (hidden by default)
+            renderPaceZonesTable('pace-zones-eloisa-body', window.projectData.runs.paceDefinitionsEloisa);
+            // Change Eloísa's layout to be stacked
+            document.getElementById('treino-eloisa-content').classList.remove('grid', 'grid-cols-1', 'md:grid-cols-2', 'lg:grid-cols-3', 'gap-6');
+            document.getElementById('treino-eloisa-content').classList.add('space-y-8');
+            renderRunningWorkouts('treino-eloisa-content', ['segunda_eloisa', 'quarta_eloisa', 'sabado_eloisa'], false); // Pass false for Eloísa
+
+
+            // Sub-navigation logic
+            const subNavButtons = container.querySelectorAll('.sub-nav-button');
+            const runContentSections = container.querySelectorAll('.run-content-section');
+
+            subNavButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const targetId = button.dataset.target;
+
+                    subNavButtons.forEach(btn => btn.classList.remove('active'));
+                    button.classList.add('active');
+
+                    runContentSections.forEach(section => {
+                        section.classList.remove('active');
+                        if (section.id === targetId) {
+                            section.classList.add('active');
+                        }
+                    });
+                });
+            });
+        }
+
+        function initNutritionView() {
+            console.log('Initializing Nutrition View...'); // Log para depuração
+            const container = document.getElementById('nutricao');
+            if (!container) {
+                console.error("Container #nutricao não encontrado!");
+                return;
+            }
+            const data = window.projectData.nutrition;
+            try {
+                container.innerHTML = `
+                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <div class="lg:col-span-2 bg-white p-6 rounded-lg shadow-md">
+                            <h3 class="text-xl font-bold text-slate-900 mb-4">Plano Alimentar Diário</h3>
+                            <div class="space-y-4">
+                                ${data.meals.map((meal, index) => `
+                                    <div class="p-4 bg-slate-50 rounded-md">
+                                        <h4 class="font-semibold text-teal-700">${meal.name}</h4>
+                                        <p class="text-slate-600">${meal.items}</p>
+                                    </div>
+                                `).join('')}
+                            </div>
+                             <div class="mt-6">
+                                <h3 class="text-xl font-bold text-slate-900 mb-4">Análise de Macronutrientes (Aprox.)</h3>
+                                 <div class="overflow-x-auto">
+                                     <table class="run-table w-full text-sm text-left border-collapse">
+                                         <thead>
+                                            <tr>
+                                                <th class="px-4 py-2">Refeição</th>
+                                                <th class="px-4 py-2">Proteínas (g)</th>
+                                                <th class="px-4 py-2">Carboidratos (g)</th>
+                                                <th class="px-4 py-2">Gorduras (g)</th>
+                                                <th class="px-4 py-2">Kcal</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${data.macros.map(macro => `
+                                                <tr class="border-b border-gray-200">
+                                                    <td class="px-4 py-2 font-medium">${macro.meal}</td>
+                                                    <td class="px-4 py-2">${macro.protein}</td>
+                                                    <td class="px-4 py-2">${macro.carbs}</td>
+                                                    <td class="px-4 py-2">${macro.fat}</td>
+                                                    <td class="px-4 py-2">${macro.kcal}</td>
+                                                </tr>
+                                            `).join('')}
+                                            <tr class="font-bold bg-slate-50">
+                                                 <td class="px-4 py-2">Total Diário</td>
+                                                 <td class="px-4 py-2">${data.total.protein}</td>
+                                                 <td class="px-4 py-2">${data.total.carbs}</td>
+                                                 <td class="px-4 py-2">${data.total.fat}</td>
+                                                 <td class="px-4 py-2">${data.total.kcal}</td>
+                                            </tr>
+                                        </tbody>
+                                     </table>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="space-y-8">
+                            <div class="bg-white p-6 rounded-lg shadow-md">
+                                 <h3 class="text-xl font-bold text-slate-900 mb-2">${data.isotonic.title}</h3>
+                                 <p class="text-slate-600">${data.isotonic.recipe}</p>
+                            </div>
+                            <div class="bg-white p-6 rounded-lg shadow-md">
+                                 <h3 class="text-xl font-bold text-slate-900 mb-2">Reforço Imunológico Natural no Inverno</h3>
+                                 ${data.naturalImmunity.sections.map(section => `
+                                    <h4 class="font-semibold text-teal-700 mt-4">${section.heading}</h4>
+                                    <ul class="list-disc list-inside text-slate-600 space-y-1">
+                                        ${section.items.map(item => `<li>${item}</li>`).join('')}
+                                    </ul>
+                                 `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } catch (e) {
+                console.error("Erro ao inicializar a vista 'Nutrição':", e);
+            }
+        }
+
+        function renderProgressTable() {
+            console.log('Rendering Progress Table...'); // Log para depuração
+            const tableBody = document.getElementById('progress-table').querySelector('tbody');
+            if (!tableBody) {
+                console.error("Table body for progress table not found!");
+                return;
+            }
+            tableBody.innerHTML = ''; // Clear existing rows
+
+            const pData = window.projectData.progress;
+            const numEntries = pData.dates.length;
+
+            try {
+                for (let i = 0; i < numEntries; i++) {
+                    const row = tableBody.insertRow();
+                    row.insertCell().textContent = pData.dates[i]; // Date is not editable for simplicity
+                    const editableCells = ['weight', 'fatPercentage', 'fatMass', 'leanMass', 'waist', 'abdomen'];
+                    editableCells.forEach(key => {
+                        const cell = row.insertCell();
+                        cell.contentEditable = "true";
+                        cell.dataset.key = key;
+                        cell.dataset.index = i;
+                        cell.textContent = pData[key][i];
+                        cell.addEventListener('input', handleProgressCellEdit);
+                        cell.addEventListener('blur', handleProgressCellBlur); // Save on blur
+                    });
+
+                    // Skinfolds are an array of arrays, handled differently
+                    pData.skinfolds.labels.forEach((label, skinfoldIndex) => {
+                        const cell = row.insertCell();
+                        cell.contentEditable = "true";
+                        cell.dataset.key = 'skinfolds';
+                        cell.dataset.skinfoldIndex = skinfoldIndex;
+                        cell.dataset.index = i;
+                        cell.textContent = pData.skinfolds.data[i][skinfoldIndex];
+                        cell.addEventListener('input', handleProgressCellEdit);
+                        cell.addEventListener('blur', handleProgressCellBlur); // Save on blur
+                    });
+                }
+            } catch (e) {
+                console.error("Erro ao renderizar linhas da tabela de progresso:", e);
+            }
+        }
+
+        function handleProgressCellEdit(event) {
+            const cell = event.target;
+            const key = cell.dataset.key;
+            const index = parseInt(cell.dataset.index);
+            let value = parseFloat(cell.textContent); // Try to parse as float
+
+            // Handle potential NaN if user types non-numeric characters
+            if (isNaN(value)) {
+                value = 0; // Default to 0 or handle as an error
+                cell.textContent = 0; // Correct the display
+            }
+
+            if (key === 'skinfolds') {
+                const skinfoldIndex = parseInt(cell.dataset.skinfoldIndex);
+                window.projectData.progress.skinfolds.data[index][skinfoldIndex] = value;
+            } else {
+                window.projectData.progress[key][index] = value;
+            }
+        }
+
+        function handleProgressCellBlur() {
+            // This function is called when a cell loses focus
+            // It triggers a save to Firestore
+            window.saveProgressDataToFirestore();
+        }
+
+        function addProgressRow() {
+            const pData = window.projectData.progress;
+            const newDate = new Date().toLocaleDateString('pt-BR'); // Current date
+
+            // Add new empty entries for numerical data, and 0 for skinfolds
+            pData.dates.push(newDate);
+            pData.weight.push(0);
+            pData.fatPercentage.push(0);
+            pData.fatMass.push(0);
+            pData.leanMass.push(0);
+            pData.waist.push(0);
+            pData.abdomen.push(0);
+            pData.skinfolds.data.push(new Array(pData.skinfolds.labels.length).fill(0));
+
+            renderProgressTable();
+            window.saveProgressDataToFirestore(); // Save after adding
+        }
+
+        function removeProgressRow() {
+            const pData = window.projectData.progress;
+            if (pData.dates.length > 1) { // Ensure at least one row remains
+                pData.dates.pop();
+                pData.weight.pop();
+                pData.fatPercentage.pop();
+                pData.fatMass.pop();
+                pData.leanMass.pop();
+                pData.waist.pop();
+                pData.abdomen.pop();
+                pData.skinfolds.data.pop();
+                renderProgressTable();
+                window.saveProgressDataToFirestore(); // Save after removing
+            } else {
+                console.warn("Cannot remove last progress row.");
+            }
+        }
+
+        function initCharts() {
+            console.log('Initializing Charts...'); // Log para depuração
+            // Destroy existing charts if they exist to prevent memory leaks and re-rendering issues
+            if (window.weightFatChartInstance) window.weightFatChartInstance.destroy();
+            if (window.bodyCompositionChartInstance) window.bodyCompositionChartInstance.destroy();
+            if (window.circumferenceChartInstance) window.circumferenceChartInstance.destroy();
+            if (window.skinfoldChartInstance) window.skinfoldChartInstance.destroy();
+
+            const progressData = window.projectData.progress;
+
+            try {
+                // Chart 1: Weight & Fat %
+                const ctx1 = document.getElementById('weightFatChart');
+                if (ctx1) {
+                    window.weightFatChartInstance = new Chart(ctx1.getContext('2d'), {
+                        type: 'line',
+                        data: {
+                            labels: progressData.dates,
+                            datasets: [
+                                {
+                                    label: 'Peso (kg)',
+                                    data: progressData.weight,
+                                    borderColor: '#0d9488', // teal-600
+                                    backgroundColor: '#ccfbf1', // teal-100
+                                    yAxisID: 'y',
+                                    tension: 0.1
+                                },
+                                {
+                                    label: '% de Gordura',
+                                    data: progressData.fatPercentage,
+                                    borderColor: '#f97316', // orange-500
+                                    backgroundColor: '#ffedd5', // orange-100
+                                    yAxisID: 'y1',
+                                    tension: 0.1
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: { position: 'left', title: { display: true, text: 'Peso (kg)' } },
+                                y1: { position: 'right', title: { display: true, text: '% Gordura' }, grid: { drawOnChartArea: false } }
+                            }
+                        }
+                    });
+                } else { console.warn("Canvas 'weightFatChart' não encontrado para o gráfico."); }
+
+
+                // Chart 2: Body Composition
+                const ctx2 = document.getElementById('bodyCompositionChart');
+                if (ctx2) {
+                    window.bodyCompositionChartInstance = new Chart(ctx2.getContext('2d'), {
+                        type: 'bar',
+                        data: {
+                             labels: progressData.dates,
+                             datasets: [
+                                {
+                                    label: 'Massa Gordurosa (kg)',
+                                    data: progressData.fatMass,
+                                    backgroundColor: '#f97316', // orange-500
+                                },
+                                 {
+                                    label: 'Massa Livre de Gordura (kg)',
+                                    data: progressData.leanMass,
+                                    backgroundColor: '#0d9488', // teal-600
+                                }
+                             ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: { x: { stacked: true }, y: { stacked: true, title: {display: true, text: 'Massa (kg)'} } }
+                        }
+                    });
+                } else { console.warn("Canvas 'bodyCompositionChart' não encontrado para o gráfico."); }
+
+                // Chart 3: Circumferences
+                const ctx3 = document.getElementById('circumferenceChart');
+                if (ctx3) {
+                    window.circumferenceChartInstance = new Chart(ctx3.getContext('2d'), {
+                        type: 'line',
+                        data: {
+                            labels: progressData.dates,
+                            datasets: [
+                                {
+                                    label: 'Cintura (cm)',
+                                    data: progressData.waist,
+                                    borderColor: '#3b82f6', // blue-500
+                                    backgroundColor: '#dbeafe', // blue-100
+                                    tension: 0.1
+                                },
+                                {
+                                    label: 'Abdômen (cm)',
+                                    data: progressData.abdomen,
+                                    borderColor: '#ec4899', // pink-500
+                                    backgroundColor: '#fce7f3', // pink-100
+                                    tension: 0.1
+                                }
+                            ]
+                        },
+                        options: {
+                             responsive: true,
+                             maintainAspectRatio: false,
+                             scales: { y: { title: { display: true, text: 'Circunferência (cm)' } } }
+                        }
+                    });
+                } else { console.warn("Canvas 'circumferenceChart' não encontrado para o gráfico."); }
+
+
+                 // Chart 4: Skinfolds
+                const ctx4 = document.getElementById('skinfoldChart');
+                if (ctx4) {
+                    window.skinfoldChartInstance = new Chart(ctx4.getContext('2d'), {
+                        type: 'radar',
+                        data: {
+                            labels: progressData.skinfolds.labels,
+                            datasets: progressData.dates.map((date, index) => ({
+                                label: date,
+                                data: progressData.skinfolds.data[index],
+                                borderColor: `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 0.8)`, // Random color for each dataset
+                                backgroundColor: `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 0.2)`,
+                            }))
+                        },
+                        options: {
+                             responsive: true,
+                             maintainAspectRatio: false,
+                             elements: { line: { tension: 0.1 } },
+                             scales: { r: { pointLabels: { font: { size: 10 } } } }
+                        }
+                    });
+                } else { console.warn("Canvas 'skinfoldChart' não encontrado para o gráfico."); }
+
+            } catch (e) {
+                console.error("Erro ao inicializar gráficos:", e);
+            }
+        }
+
+         function initCalendarView() {
+            console.log('Initializing Calendar View...'); // Log para depuração
+            const container = document.getElementById('calendario');
+            if (!container) {
+                console.error("Container #calendario não encontrado!");
+                return;
+            }
+            try {
+                let calendarHTML = `
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="text-xl font-bold text-slate-900 mb-4 text-center">Calendário de Julho 2025</h3>
+                        <div class="grid grid-cols-7 gap-1 text-center font-semibold text-slate-600 mb-2">
+                            <div>Dom</div><div>Seg</div><div>Ter</div><div>Qua</div><div>Qui</div><div>Sex</div><div>Sáb</div>
+                        </div>
+                        <div class="grid grid-cols-7 gap-1">
+                `;
+                const firstDayOfMonth = new Date(2025, 6, 1).getDay(); // July 1, 2025 is a Tuesday (2)
+                // If the first day is not Sunday, add empty divs to align days correctly
+                for (let i = 0; i < firstDayOfMonth; i++) {
+                    calendarHTML += `<div class="border rounded-md bg-slate-50 min-h-[96px]"></div>`; // Changed h-24 to min-h-[96px]
+                }
+
+                window.projectData.calendar.forEach(dayData => {
+                    const today = new Date();
+                    const currentYear = today.getFullYear();
+                    const currentMonth = today.getMonth(); // 0-indexed
+                    const dayDate = new Date(currentYear, currentMonth, dayData.day);
+
+                    let financeIndicator = '';
+                    // Check for bill payments
+                    const obligationsToday = window.projectData.finances.billPayments.filter(bill => bill.day === dayData.day);
+                    if (obligationsToday.length > 0) {
+                        financeIndicator += '<span class="text-red-500 text-xs font-bold">💲</span>';
+                    }
+
+                    // Check for salary and advance payment
+                    const salaryDate = getNthBusinessDay(currentYear, currentMonth, window.projectData.finances.salaryDetails.salaryDay, true);
+                    if (salaryDate && salaryDate.getDate() === dayData.day) {
+                        financeIndicator += '<span class="text-green-500 text-xs font-bold">💰</span>';
+                    }
+
+                    const advancePaymentDate = getNextBusinessDay(new Date(currentYear, currentMonth, window.projectData.finances.salaryDetails.advanceDay));
+                    if (advancePaymentDate && advancePaymentDate.getDate() === dayData.day) {
+                        financeIndicator += '<span class="text-green-500 text-xs font-bold">💵</span>';
+                    }
+
+                     calendarHTML += `
+                        <div data-day="${dayData.day}" class="calendar-day border rounded-md p-2 min-h-[96px] flex flex-col justify-start cursor-pointer hover:bg-teal-50 transition">
+                            <span class="font-bold self-end">${dayData.day} ${financeIndicator}</span>
+                            <span class="text-xs text-slate-500 mt-1">${dayData.activity}</span>
+                        </div>
+                    `;
+                });
+                calendarHTML += `</div></div>`;
+                container.innerHTML = calendarHTML;
+            } catch (e) {
+                console.error("Erro ao inicializar a vista 'Calendário':", e);
+            }
+        }
+
+        function initFinancesView() {
+            console.log('Initializing Finances View...');
+            const fixedPaymentsBody = document.getElementById('fixed-payments-body');
+            const creditCardInfoBody = document.getElementById('credit-card-info-body'); // New tbody
+            const salaryAdvanceBody = document.getElementById('salary-advance-body');
+
+            if (!fixedPaymentsBody || !creditCardInfoBody || !salaryAdvanceBody) {
+                console.error("Financial tables not found!");
+                return;
+            }
+
+            // Populate Fixed Payments Table (Vencimentos) - NOW SORTED BY DAY AND THEN NAME
+            fixedPaymentsBody.innerHTML = window.projectData.finances.billPayments.map(bill => `
+                <tr class="border-b border-gray-200">
+                    <td class="px-4 py-2">${bill.name}</td>
+                    <td class="px-4 py-2">${bill.day}</td>
+                    <td class="px-4 py-2">
+                        <span contenteditable="true" class="inline-block min-w-[80px] text-right" data-bill-name="${bill.name}" data-bill-day="${bill.day}">0.00</span>
+                    </td>
+                    <td class="px-4 py-2"></td>
+                </tr>
+            `).join('');
+
+            // Add event listeners for editable bill value cells
+            document.querySelectorAll('#fixed-payments-body [contenteditable="true"]').forEach(cell => {
+                cell.addEventListener('input', (e) => {
+                    let value = e.target.textContent.replace(',', '.'); // Replace comma with dot for float parsing
+                    if (isNaN(parseFloat(value))) {
+                        e.target.textContent = '0.00'; // Reset if invalid
+                    } else {
+                        e.target.textContent = parseFloat(value).toFixed(2); // Format to 2 decimal places
+                    }
+                });
+                cell.addEventListener('blur', (e) => {
+                    // Optional: Save to local storage or Firestore if persistence is desired for these values
+                    console.log(`Bill ${e.target.dataset.billName} on day ${e.target.dataset.billDay} updated to R$ ${e.target.textContent}`);
+                });
+            });
+
+            // Populate Credit Card Info Table - NOW SORTED BY MATURITY DAY
+            creditCardInfoBody.innerHTML = window.projectData.finances.creditCardInfo.map(card => `
+                <tr class="border-b border-gray-200">
+                    <td class="px-4 py-2">${card.name}</td>
+                    <td class="px-4 py-2">${card.maturityDay}</td>
+                    <td class="px-4 py-2">${card.closingDay}</td>
+                </tr>
+            `).join('');
+
+
+            // Populate Salary and Advance Table for the next 12 months
+            salaryAdvanceBody.innerHTML = '';
+            const today = new Date();
+            for (let i = 0; i < 12; i++) {
+                const year = today.getFullYear();
+                const month = (today.getMonth() + i) % 12; // 0-indexed month
+                const displayYear = year + Math.floor((today.getMonth() + i) / 12); // Adjust year for next year's months
+
+                const monthNames = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+                const monthName = monthNames[month];
+
+                const salaryDate = getNthBusinessDay(displayYear, month, window.projectData.finances.salaryDetails.salaryDay, true);
+                const advancePaymentDate = getNextBusinessDay(new Date(displayYear, month, window.projectData.finances.salaryDetails.advanceDay));
+
+                const salaryDayFormatted = salaryDate ? salaryDate.getDate() : 'N/A';
+                const advanceDayFormatted = advancePaymentDate ? advancePaymentDate.getDate() : 'N/A';
+
+                const row = `
+                    <tr class="border-b border-gray-200">
+                        <td class="px-4 py-2">${monthName}/${displayYear}</td>
+                        <td class="px-4 py-2 text-green-700 font-semibold">Dia ${salaryDayFormatted}</td>
+                        <td class="px-4 py-2 text-green-700 font-semibold">Dia ${advanceDayFormatted}</td>
+                    </tr>
+                `;
+                salaryAdvanceBody.innerHTML += row;
+            }
+        }
+
+    </script>
+</body>
+</html>
