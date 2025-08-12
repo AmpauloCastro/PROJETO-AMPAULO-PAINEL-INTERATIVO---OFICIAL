@@ -1,1147 +1,1719 @@
-import React, { useState, useEffect } from 'react';
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel Interativo - Ampaulo</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
 
-// Função auxiliar para formatar a data de YYYY-MM-DD para DD/MM/YYYY
-const formatDate = (dateString) => {
-  if (!dateString) return '';
-  const [year, month, day] = dateString.split('-');
-  return `${day}/${month}/${year}`;
-};
+    <!-- Firebase SDKs - Certifique-se de usar suas chaves reais no ambiente local -->
+    <script type="module" src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"></script>
 
-// Função para obter as datas de início e fim de uma semana, começando no domingo (UTC-agnóstico)
-const getWeekRangeSundayStart = (dateString) => {
-  // Cria um objeto Date a partir da string da data, garantindo que seja tratado como meia-noite UTC.
-  // Isso ajuda a prevenir problemas de fuso horário que podem deslocar a data.
-  const d = new Date(dateString + 'T00:00:00Z');
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        .view { display: none; animation: fadeIn 0.5s ease-in-out; }
+        .view.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Estilos do Botão de Navegação Principal */
+        .nav-button {
+            transition: all 0.3s ease-in-out;
+            color: #475569; /* slate-600 */
+            border: 2px solid transparent;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+        }
+        .nav-button:hover {
+            color: #0d9488; /* teal-600 */
+            border-color: #22d3ee; /* cyan-400 */
+            background-color: #e0f2f1; /* teal-100 */
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .nav-button.active {
+            color: #0d9488; /* teal-600 */
+            background-color: #e0f2f1; /* teal-100 */
+            border-color: #22d3ee; /* cyan-400 */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        
+        .chart-container { position: relative; margin: auto; height: 40vh; width: 100%; max-width: 800px; }
+        .workout-accordion-content, .group-accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.5s ease-in-out; }
+        .workout-accordion-button.open + .workout-accordion-content, .group-accordion-button.open + .group-accordion-content { max-height: 2000px; }
+        .run-table thead tr { background-color: #1f2937; color: #ffffff; }
+        .run-table tbody tr:nth-child(odd) { background-color: #f8fafc; }
+        
+        .goal-card.current-month {
+            border-width: 2px;
+            border-color: #0d9488;
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
 
-  // Obtém o dia da semana UTC (0 para Domingo, 1 para Segunda, ..., 6 para Sábado)
-  const dayOfWeek = d.getUTCDay();
+        /* Estilos do Botão de Navegação Secundária da Corrida */
+        .sub-nav-button {
+            transition: all 0.3s ease-in-out;
+            border: 2px solid transparent;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            background-color: #e2e8f0; /* slate-200 */
+            color: #475569; /* slate-600 */
+            font-weight: 600;
+        }
+        .sub-nav-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .sub-nav-button.active {
+            background-color: #0d9488; /* teal-600 */
+            color: #ffffff;
+            border-color: #22d3ee; /* cyan-400 */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
 
-  // Calcula a data para o Domingo da semana atual
-  const sunday = new Date(d);
-  sunday.setUTCDate(d.getUTCDate() - dayOfWeek); // Ajusta para o Domingo da semana em UTC
-
-  // Calcula a data para o Sábado da semana atual
-  const saturday = new Date(sunday);
-  saturday.setUTCDate(sunday.getUTCDate() + 6); // Define para o Sábado da semana em UTC
-
-  // Função auxiliar para formatar objetos Date para a string YYYY-MM-DD
-  const formatIsoDate = (dateObj) => dateObj.toISOString().slice(0, 10);
-
-  return {
-    sunday: formatIsoDate(sunday),
-    saturday: formatIsoDate(saturday)
-  };
-};
-
-// Componente principal da aplicação
-const App = () => {
-  // Estado para os dados do usuário (dados de exemplo por enquanto)
-  const [userData, setUserData] = useState({
-    name: 'Polímata Normal',
-    level: 'Potencial para Ótimo',
-    totalRuns: 150,
-    totalDistance: 1250, // km
-    avgPace: '5:30 min/km',
-  });
-
-  // Dados das zonas de ritmo atualizados com Km/h
-  const paceZones = [
-    { zone: 'Z1 – Recuperação Ativa', paceMin: '07:31', paceMax: '08:30', kmhApprox: '7.1 – 8.0', description: 'Caminhada rápida ou trote suave' },
-    { zone: 'Z2 – Ritmo Leve', paceMin: '07:00', paceMax: '07:30', kmhApprox: '8.0 – 8.6', description: 'Conversa fácil, base regenerativa' },
-    { zone: 'Z3 – Ritmo Moderado', paceMin: '06:31', paceMax: '06:59', kmhApprox: '8.6 – 9.2', description: 'Levemente ofegante, treino aeróbico' },
-    { zone: 'Z4 – Ritmo Forte', paceMin: '06:00', paceMax: '06:30', kmhApprox: '9.2 – 10.0', description: 'Alta intensidade, melhora de velocidade' },
-    { zone: 'Z5 – Sprint / Máximo', paceMin: '05:00', paceMax: '05:59', kmhApprox: '10.0 – 12.0', description: 'Sprint curto, potência, técnica' },
-  ];
-
-  // Estado para os registros de treino com os novos dados detalhados
-  const [trainingLog, setTrainingLog] = useState([
-    // Dados de Julho de 2025
-    {
-      id: 1, date: '2025-07-14', distance: 6.4, time: '46:00', pace: '7:12', notes: 'Corrida Leve',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:45/km', zone: 'Z1', observations: 'Caminhada rápida / trote' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote leve e constante' },
-        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Concentração no ritmo' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Respiração tranquila' },
-        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Passada firme e natural' },
-        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Foco no conforto final' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Caminhada + trote leve (0.4 km)' },
-      ]
-    },
-    {
-      id: 2, date: '2025-07-16', distance: 7.6, time: '50:00', pace: '6:35', notes: 'Corrida Intervalada',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Soltar articulações' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
-        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Força e explosão' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação com respiração' },
-        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Frequência e constância' },
-        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização do esforço' },
-        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Finalização de estímulo' },
-        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote final' },
-      ]
-    },
-    {
-      id: 3, date: '2025-07-19', distance: 11.1, time: '73:00', pace: '6:34', notes: 'Corrida Longa',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Ritmo leve para aquecer' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Transição gradual' },
-        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Base sólida' },
-        { km: '4', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Mantendo fluidez' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Fase de recuperação ativa' },
-        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Retomando controle' },
-        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Leve aceleração' },
-        { km: '8', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Ajuste respiratório' },
-        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo forte final' },
-        { km: '10', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Manter até o final' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve (0.4 km)' },
-      ]
-    },
-    {
-      id: 4, date: '2025-07-21', distance: 6.4, time: '46:00', pace: '7:12', notes: 'Corrida Leve',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:45/km', zone: 'Z1', observations: 'Caminhada rápida / trote' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote leve e constante' },
-        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Concentração no ritmo' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Respiração tranquila' },
-        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Passada firme e natural' },
-        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Foco no conforto final' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Caminhada + trote leve (0.4 km)' },
-      ]
-    },
-    {
-      id: 5, date: '2025-07-23', distance: 7.6, time: '50:00', pace: '6:35', notes: 'Corrida Intervalada',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Soltar articulações' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
-        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Força e explosão' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação com respiração' },
-        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Frequência e constância' },
-        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização do esforço' },
-        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Finalização de estímulo' },
-        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote final' },
-      ]
-    },
-    {
-      id: 6, date: '2025-07-26', distance: 12.0, time: '77:00', pace: '6:25', notes: 'Corrida Longa',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Ritmo leve para aquecer' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Transição gradual' },
-        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Base sólida' },
-        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Mantendo fluidez' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Recuperação ativa' },
-        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Retomando controle' },
-        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Aceleração leve' },
-        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Ajuste respiratório' },
-        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo final' },
-        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Estabilização final' },
-        { km: '11', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Transição para desaquecimento' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve (1 km)' },
-      ]
-    },
-    {
-      id: 7, date: '2025-07-28', distance: 6.4, time: '46:00', pace: '7:12', notes: 'Corrida Leve',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:45/km', zone: 'Z1', observations: 'Caminhada rápida / trote' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote leve e constante' },
-        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Concentração no ritmo' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Respiração tranquila' },
-        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Passada firme e natural' },
-        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Foco no conforto final' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Caminhada + trote leve (0.4 km)' },
-      ]
-    },
-    {
-      id: 8, date: '2025-07-30', distance: 7.6, time: '50:00', pace: '6:35', notes: 'Corrida Intervalada',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Soltar articulações' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
-        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Força e explosão' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação com respiração' },
-        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Frequência e constância' },
-        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização do esforço' },
-        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Finalização de estímulo' },
-        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote final' },
-      ]
-    },
-    // Dados de Agosto de 2025
-    {
-      id: 9, date: '2025-08-02', distance: 11.8, time: '80:00', pace: '6:47', notes: 'Corrida Longa',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início suave e constante' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Ritmo tranquilo para adaptação' },
-        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Construção de base aeróbica' },
-        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Aceleração progressiva' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Recuperação' },
-        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Retomada de ritmo constante' },
-        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Manutenção do pace médio' },
-        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Transição para esforço final' },
-        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo final' },
-        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Consolidação do treino' },
-        { km: '11', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote' },
-        { km: '12', step: 'Final', pace: '—', zone: '—', observations: 'Respiração e hidratação' },
-      ]
-    },
-    {
-      id: 10, date: '2025-08-04', distance: 6.4, time: '46:00', pace: '7:12', notes: 'Corrida Leve',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:45/km', zone: 'Z1', observations: 'Caminhada rápida / trote' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote leve e constante' },
-        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Concentração no ritmo' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Respiração tranquila' },
-        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Passada firme e natural' },
-        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Foco no conforto final' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Caminhada + trote leve (0.4 km)' },
-      ]
-    },
-    {
-      id: 11, date: '2025-08-06', distance: 7.6, time: '50:00', pace: '6:35', notes: 'Corrida Intervalada',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Soltar articulações' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
-        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Força e explosão' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação com respiração' },
-        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Frequência e constância' },
-        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização do esforço' },
-        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Finalização de estímulo' },
-        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote final' },
-      ]
-    },
-    {
-      id: 12, date: '2025-08-09', distance: 12.3, time: '83:00', pace: '6:44', notes: 'Corrida Longa',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Ritmo leve para aquecer' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Transição gradual' },
-        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Base sólida' },
-        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Mantendo fluidez' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Recuperação ativa' },
-        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Retomando controle' },
-        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Aceleração leve' },
-        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Ajuste respiratório' },
-        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo final' },
-        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Manter o controle' },
-        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Transição para final' },
-        { km: '12', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve (1.3 km)' },
-      ]
-    },
-    {
-      id: 13, date: '2025-08-11', distance: 6.5, time: '46:00', pace: '7:04', notes: 'Corrida Leve',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Ritmo leve, respiração tranquila' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Passada natural' },
-        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Estabilização do corpo' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Soltura muscular' },
-        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Final com leve controle' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve (0.4 km)' },
-      ]
-    },
-    {
-      id: 14, date: '2025-08-13', distance: 7.8, time: '50:00', pace: '6:25', notes: 'Corrida Intervalada',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Leve corrida inicial' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Trote + caminhada' },
-        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Força e técnica' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação com trote' },
-        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Frequência ativa' },
-        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Soltura' },
-        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Aceleração controlada' },
-        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
-      ]
-    },
-    {
-      id: 15, date: '2025-08-16', distance: 13.0, time: '85:00', pace: '6:32', notes: 'Corrida Longa',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início suave' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Ajustando respiração' },
-        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Constância' },
-        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Estabilizando' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Recuperação leve' },
-        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Controle postural' },
-        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Aceleração leve' },
-        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Soltar musculatura' },
-        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Final com potência' },
-        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Resistência final' },
-        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Fase de transição' },
-        { km: '12', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + leve trote' },
-        { km: '13', step: 'Final', pace: '—', zone: '—', observations: 'Hidratação' },
-      ]
-    },
-    {
-      id: 16, date: '2025-08-18', distance: 6.5, time: '46:00', pace: '7:04', notes: 'Corrida Leve',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Ritmo leve, respiração tranquila' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Passada natural' },
-        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Estabilização do corpo' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Soltura muscular' },
-        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Final com leve controle' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve (0.4 km)' },
-      ]
-    },
-    {
-      id: 17, date: '2025-08-20', distance: 8.0, time: '50:00', pace: '6:15', notes: 'Corrida Intervalada',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Trote leve' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + respiração controlada' },
-        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Aceleração intensa' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação' },
-        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Explosão moderada' },
-        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização respiratória' },
-        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Finalização de estímulo' },
-        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote' },
-      ]
-    },
-    {
-      id: 18, date: '2025-08-23', distance: 13.5, time: '88:00', pace: '6:30', notes: 'Corrida Longa',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início estável' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Ajuste de respiração' },
-        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Consolidação de base' },
-        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Fluidez constante' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Transição leve' },
-        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Força estável' },
-        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Leve aceleração' },
-        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Soltar tensão' },
-        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo final' },
-        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Sustentação' },
-        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Transição para o fim' },
-        { km: '12', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
-        { km: '13', step: 'Final', pace: '—', zone: '—', observations: 'Reidratação e descanso' },
-      ]
-    },
-    {
-      id: 19, date: '2025-08-25', distance: 6.5, time: '46:00', pace: '7:04', notes: 'Corrida Leve',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início com leve trote' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Ritmo de recuperação' },
-        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Passada eficiente' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Respirando com conforto' },
-        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Foco na postura' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + respiração leve' },
-      ]
-    },
-    {
-      id: 20, date: '2025-08-27', distance: 7.5, time: '50:00', pace: '6:40', notes: 'Corrida Intervalada',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Trote progressivo' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada rápida' },
-        { km: '3', step: 'Sprint', pace: '5:15/km', zone: 'Z5', observations: '30s forte' },
-        { km: '4', step: 'Recuperação', pace: '7:15/km', zone: 'Z2', observations: '1m30 leve' },
-        { km: '5', step: 'Sprint', pace: '5:15/km', zone: 'Z5', observations: '30s forte' },
-        { km: '6', step: 'Recuperação', pace: '7:15/km', zone: 'Z2', observations: '1m30 leve' },
-        { km: '7', step: 'Sprint', pace: '5:15/km', zone: 'Z5', observations: '30s forte' },
-        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote' },
-      ]
-    },
-    {
-      id: 21, date: '2025-08-30', distance: 14.0, time: '90:00', pace: '6:25', notes: 'Corrida Longa',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início leve' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Foco na cadência' },
-        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Base estável' },
-        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Postura ativa' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Respiração equilibrada' },
-        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Controle de esforço' },
-        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Estabilização' },
-        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Recuperação ativa' },
-        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Força final' },
-        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Sustentação até o fim' },
-        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Relaxamento final' },
-        { km: '12', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
-        { km: '13', step: 'Final', pace: '—', zone: '—', observations: 'Reidratação + alongamento' },
-      ]
-    },
-    // Dados de Setembro de 2025
-    {
-      id: 22, date: '2025-09-01', distance: 6.6, time: '46:00', pace: '6:58',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início leve com passada solta' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Conversa fácil, respiração tranquila' },
-        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Postura ativa, passada firme' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação leve' },
-        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Estabilizar ritmo até o fim' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote (0.4 km)' },
-      ]
-    },
-    {
-      id: 23, date: '2025-09-03', distance: 8.0, time: '50:00', pace: '6:15', notes: 'Corrida Intervalada',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Trote leve' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada progressiva' },
-        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Sprint controlado' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação' },
-        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Força e foco na cadência' },
-        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização respiratória' },
-        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Sprint final' },
-        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
-      ]
-    },
-    {
-      id: 24, date: '2025-09-06', distance: 14.5, time: '92:00', pace: '6:20', notes: 'Corrida Longa',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Soltar articulações' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Respiração estável' },
-        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Ritmo base' },
-        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Progresso contínuo' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Reduzir carga' },
-        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Retomar controle' },
-        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Foco em cadência' },
-        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Leve transição' },
-        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo final' },
-        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Manutenção' },
-        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Transição' },
-        { km: '12', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Preparação para fim' },
-        { km: '13', step: 'Ritmo Const.', pace: '6:50/km', zone: 'Z3', observations: 'Estabilidade final' },
-        { km: '14', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve + trote leve' },
-        { km: '15', step: 'Final', pace: '—', zone: '—', observations: 'Hidratação e alongamento' },
-      ]
-    },
-    {
-      id: 25, date: '2025-09-08', distance: 6.6, time: '46:00', pace: '6:58', notes: 'Corrida Leve',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote suave para relaxar' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Respiração nasal' },
-        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Atenção à postura' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Controle de passada' },
-        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Cadência constante' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
-      ]
-    },
-    {
-      id: 26, date: '2025-09-10', distance: 7.9, time: '50:00', pace: '6:19', notes: 'Corrida Intervalada',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:15/km', zone: 'Z2', observations: 'Aumentar temperatura corporal' },
-        { km: '2', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Explosão breve e controlada' },
-        { km: '3', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação respiratória' },
-        { km: '4', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Sprint curto com foco total' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Retomar estabilidade' },
-        { km: '6', step: 'Ritmo Forte', pace: '6:15/km', zone: 'Z4', observations: 'Último estímulo do dia' },
-        { km: '7', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote' },
-        { km: '8', step: 'Finalização', pace: '—', zone: '—', observations: 'Alongamento' },
-      ]
-    },
-    {
-      id: 27, date: '2025-09-13', distance: 15.0, time: '97:00', pace: '6:28', notes: 'Corrida Longa',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote leve' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Passada leve, natural' },
-        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Estabilizar' },
-        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Consistência' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Aliviar impacto' },
-        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Retomar cadência' },
-        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Estímulo médio' },
-        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Condução leve' },
-        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Aceleração consciente' },
-        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Fechar em consistência' },
-        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Respirar e manter' },
-        { km: '12', step: 'Ritmo Const.', pace: '6:55/km', zone: 'Z3', observations: 'Final com ritmo médio' },
-        { km: '13', step: 'Ritmo Const.', pace: '6:55/km', zone: 'Z3', observations: 'Resistência' },
-        { km: '14', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
-        { km: '15', step: 'Final', pace: '—', zone: '—', observations: 'Hidratação + alongamento' },
-      ]
-    },
-    {
-      id: 28, date: '2025-09-15', distance: 6.6, time: '46:00', pace: '6:58', notes: 'Corrida Leve',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Trote suave' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Ritmo estável e leve' },
-        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Foco em respiração' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Desacelerar sem perder ritmo' },
-        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Finalização' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
-      ]
-    },
-    {
-      id: 29, date: '2025-09-17', distance: 8.0, time: '50:00', pace: '6:15', notes: 'Corrida Intervalada',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Trote leve' },
-        { km: '2', step: 'Aquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada progressiva' },
-        { km: '3', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Sprint controlado' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação' },
-        { km: '5', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Força e foco na cadência' },
-        { km: '6', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilização respiratória' },
-        { km: '7', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Sprint final' },
-        { km: '8', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
-      ]
-    },
-    {
-      id: 30, date: '2025-09-20', distance: 15.0, time: '98:00', pace: '6:32', notes: 'Corrida Longa',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Ritmo leve' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Passada leve' },
-        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Base sólida' },
-        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Controle de passada' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Recuperação ativa' },
-        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Consistência' },
-        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Aceleração leve' },
-        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Transição respiratória' },
-        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Estímulo final' },
-        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Manter esforço' },
-        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Estabilização final' },
-        { km: '12', step: 'Ritmo Const.', pace: '6:55/km', zone: 'Z3', observations: 'Final técnico' },
-        { km: '13', step: 'Ritmo Const.', pace: '6:55/km', zone: 'Z3', observations: 'Resiliência' },
-        { km: '14', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada + trote leve' },
-        { km: '15', step: 'Final', pace: '—', zone: '—', observations: 'Hidratação e alongamento' },
-      ]
-    },
-    {
-      id: 31, date: '2025-09-22', distance: 6.6, time: '46:00', pace: '6:58', notes: 'Corrida Leve',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Início leve com postura solta' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Foco na respiração nasal' },
-        { km: '3', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Atenção à pisada e passada firme' },
-        { km: '4', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Estabilizar' },
-        { km: '5', step: 'Ritmo Const.', pace: '6:45/km', zone: 'Z3', observations: 'Foco e controle' },
-        { km: '+', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
-      ]
-    },
-    {
-      id: 32, date: '2025-09-24', distance: 7.9, time: '50:00', pace: '6:19', notes: 'Corrida Intervalada',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:00/km', zone: 'Z2', observations: 'Trote suave' },
-        { km: '2', step: 'Ritmo Forte', pace: '6:15/km', zone: 'Z4', observations: 'Cadência e técnica' },
-        { km: '3', step: 'Ritmo Leve', pace: '7:00/km', zone: 'Z2', observations: 'Recuperação' },
-        { km: '4', step: 'Ritmo Máximo', pace: '5:30/km', zone: 'Z5', observations: 'Aceleração curta' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Reduzir impacto' },
-        { km: '6', step: 'Ritmo Forte', pace: '6:00/km', zone: 'Z4', observations: 'Finalizar forte' },
-        { km: '7', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
-        { km: '8', step: 'Finalização', pace: '—', zone: '—', observations: 'Alongamento final' },
-      ]
-    },
-    {
-      id: 33, date: '2025-09-27', distance: 15.2, time: '102:00', pace: '6:43', notes: 'Corrida Longa',
-      detailedWorkout: [
-        { km: '1', step: 'Aquecimento', pace: '7:30/km', zone: 'Z2', observations: 'Passada leve' },
-        { km: '2', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Progresso leve' },
-        { km: '3', step: 'Ritmo Moderado', pace: '7:00/km', zone: 'Z3', observations: 'Base sólida' },
-        { km: '4', step: 'Ritmo Moderado', pace: '6:55/km', zone: 'Z3', observations: 'Estabilizar' },
-        { km: '5', step: 'Ritmo Leve', pace: '7:15/km', zone: 'Z2', observations: 'Recuperação ativa' },
-        { km: '6', step: 'Ritmo Moderado', pace: '6:50/km', zone: 'Z3', observations: 'Ritmo firme' },
-        { km: '7', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Intensidade moderada' },
-        { km: '8', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Alívio muscular' },
-        { km: '9', step: 'Ritmo Forte', pace: '6:30/km', zone: 'Z4', observations: 'Força e superação' },
-        { km: '10', step: 'Ritmo Moderado', pace: '6:45/km', zone: 'Z3', observations: 'Resistência' },
-        { km: '11', step: 'Ritmo Leve', pace: '7:10/km', zone: 'Z2', observations: 'Equilíbrio final' },
-        { km: '12', step: 'Ritmo Const.', pace: '6:55/km', zone: 'Z3', observations: 'Conclusão em técnica' },
-        { km: '13', step: 'Ritmo Const.', pace: '6:55/km', zone: 'Z3', observations: 'Controle respiratório' },
-        { km: '14', step: 'Desaquecimento', pace: '7:30/km', zone: 'Z1', observations: 'Caminhada leve' },
-        { km: '15', step: 'Final', pace: '—', zone: '—', observations: '' },
-      ]
-    },
-  ]);
-
-  // Feriados de Eunápolis-BA para 2025
-  const holidays = [
-    { date: '2025-01-01', name: 'Confraternização Universal' },
-    { date: '2025-03-03', name: 'Carnaval' },
-    { date: '2025-03-04', name: 'Carnaval' },
-    { date: '2025-03-05', name: 'Quarta-feira de Cinzas' },
-    { date: '2025-04-18', name: 'Sexta-feira da Paixão' },
-    { date: '2025-04-21', name: 'Dia de Tiradentes' },
-    { date: '2025-05-01', name: 'Dia do Trabalhador' },
-    { date: '2025-05-24', name: 'Nossa Senhora Auxiliadora (Municipal)' },
-    { date: '2025-06-19', name: 'Corpus Christi' },
-    { date: '2025-06-24', name: 'São João (Municipal)' },
-    { date: '2025-07-02', name: 'Independência da Bahia (Estadual)' },
-    { date: '2025-09-07', name: 'Independência do Brasil' },
-    { date: '2025-10-12', name: 'Dia de Nossa Senhora Aparecida' },
-    { date: '2025-11-02', name: 'Dia de Finados' },
-    { date: '2025-11-15', name: 'Proclamação da República do Brasil' },
-    { date: '2025-11-20', name: 'Dia Nacional de Zumbi e da Consciência Negra' },
-    { date: '2025-12-25', name: 'Natal' },
-  ];
-
-  // Estado para o formulário de nova entrada de registro
-  const [newLogEntry, setNewLogEntry] = useState({
-    date: '',
-    distance: '',
-    time: '',
-    pace: '',
-    notes: '',
-    detailedWorkout: [],
-  });
-
-  // Estado da UI para controlar abas e seções expandidas
-  const [activeTab, setActiveTab] = useState('mensal'); // 'trimestral', 'mensal', 'semanal'
-  const [activeMonth, setActiveMonth] = useState(null); // 'YYYY-MM'
-  const [activeWeek, setActiveWeek] = useState(null); // 'YYYY-MM-DD_YYYY-MM-DD'
-  const [expandedDay, setExpandedDay] = useState(null); // 'YYYY-MM-DD'
-
-  // Dados de foco trimestral e mensal
-  const quarterlyFocus = {
-    '2025-Q1': {
-      title: 'Primeiro Trimestre de 2025: Fundação e Adaptação',
-      description: 'Foco na construção de uma base sólida de corrida, adaptando o corpo a diferentes ritmos e distâncias. Período de exploração e ajuste de zonas de pace.',
-      months: [
-        { name: 'Janeiro', focus: 'Início do ano, foco na consistência e adaptação.' },
-        { name: 'Fevereiro', focus: 'Introdução gradual de treinos mais longos e intervalados.' },
-        { name: 'Março', focus: 'Consolidação da base aeróbica e preparação para aumentos de volume.' },
-      ],
-    },
-    '2025-Q2': {
-      title: 'Segundo Trimestre de 2025: Aumento de Volume e Intensidade',
-      description: 'Este trimestre visa aumentar o volume semanal e a intensidade dos treinos, com foco em melhorar a resistência e a velocidade em diferentes zonas de esforço.',
-      months: [
-        { name: 'Abril', focus: 'Aumento progressivo da distância nos longões e introdução de treinos de ritmo.' },
-        { name: 'Maio', focus: 'Foco na manutenção do pace em distâncias moderadas e aprimoramento da técnica.' },
-        { name: 'Junho', focus: 'Preparação para o aumento significativo de volume no próximo trimestre.' },
-      ],
-    },
-    '2025-Q3': {
-      title: 'Terceiro Trimestre de 2025: Rumo à Excelência na Resistência',
-      description: 'Foco na consolidação de longões e aumento progressivo da distância, preparando o corpo para desafios maiores e aprimorando a capacidade aeróbica.',
-      months: [
-        { name: 'Julho', focus: 'Consolidar 12 km no longão' },
-        { name: 'Agosto', focus: 'Estabilizar 12 km no longão e preparar para 13 km' },
-        { name: 'Setembro', focus: 'Subir para 14–15 km no longão' },
-      ],
-    },
-    '2025-Q4': {
-      title: 'Quarto Trimestre de 2025: Pico de Performance e Desafios Finais',
-      description: 'Período de lapidação da performance, com foco em treinos de alta intensidade e simulações de prova. Preparação para atingir o pico e superar metas.',
-      months: [
-        { name: 'Outubro', focus: 'Preparação para distâncias maiores e foco em treinos de velocidade.' },
-        { name: 'Novembro', focus: 'Manutenção da forma física e recuperação ativa.' },
-        { name: 'Dezembro', focus: 'Revisão do ano e planejamento para a próxima temporada de treinos.' },
-      ],
-    },
-  };
-
-  // Função para lidar com mudanças nos inputs do novo registro
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setNewLogEntry({ ...newLogEntry, [name]: value });
-  };
-
-  // Função para adicionar uma nova entrada de registro
-  const addLogEntry = (e) => {
-    e.preventDefault();
-    if (newLogEntry.date && newLogEntry.distance && newLogEntry.time) {
-      const id = trainingLog.length > 0 ? Math.max(...trainingLog.map(log => log.id)) + 1 : 1;
-      setTrainingLog([...trainingLog, { ...newLogEntry, id, detailedWorkout: [] }]);
-      setNewLogEntry({ date: '', distance: '', time: '', pace: '', notes: '', detailedWorkout: [] }); // Limpar formulário
-    } else {
-      console.error("Por favor, preencha todos os campos obrigatórios.");
-    }
-  };
-
-  // Agrupa o registro de treino APENAS por mês (YYYY-MM).
-  // Isso garante que cada treino esteja estritamente sob seu mês de calendário.
-  const groupedTrainingLogByMonth = {};
-
-  trainingLog.forEach(entry => {
-    const entryYearMonth = entry.date.substring(0, 7); // 'YYYY-MM'
-    
-    // Cria um objeto Date a partir da chave do mês para obter o nome do mês corretamente.
-    // Usamos Date.UTC para evitar problemas de fuso horário.
-    const [year, monthNum] = entryYearMonth.split('-');
-    const monthDateForDisplay = new Date(Date.UTC(year, monthNum - 1, 1));
-    const monthDisplayName = monthDateForDisplay.toLocaleString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-
-    if (!groupedTrainingLogByMonth[entryYearMonth]) {
-      groupedTrainingLogByMonth[entryYearMonth] = {
-        displayName: monthDisplayName,
-        entries: []
-      };
-    }
-    groupedTrainingLogByMonth[entryYearMonth].entries.push(entry);
-  });
-
-  // Dados das dicas de corrida
-  const runningTips = [
-    "Comece devagar e aumente a distância gradualmente.",
-    "Mantenha uma boa postura: ombros relaxados, olhar para frente.",
-    "Invista em tênis adequados para o seu tipo de pisada.",
-    "Faça alongamento antes e depois da corrida.",
-    "Mantenha-se hidratado, beba água antes, durante e depois.",
-    "Varie seus treinos: inclua ritmo, fartlek e longões.",
-    "Escute seu corpo e descanse quando necessário.",
-    "Considere treinar com um parceiro ou grupo.",
-    "Defina metas realistas e celebre suas conquistas.",
-    "Alimente-se bem para ter energia e se recuperar.",
-  ];
-
-  // Placeholder para configuração do Firebase (se a persistência for necessária mais tarde)
-  useEffect(() => {
-    // Aqui é onde a inicialização e autenticação do Firebase iriam
-    // Por enquanto, é um placeholder.
-    // const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-    // const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-    // if (Object.keys(firebaseConfig).length > 0) {
-    //   const app = initializeApp(firebaseConfig);
-    //   const auth = getAuth(app);
-    //   const db = getFirestore(app);
-
-    //   const signIn = async () => {
-    //     try {
-    //       if (typeof __initial_auth_token !== 'undefined') {
-    //         await signInWithCustomToken(auth, __initial_auth_token);
-    //       } else {
-    //         await signInAnonymously(auth);
-    //       }
-    //       const userId = auth.currentUser?.uid || crypto.randomUUID();
-    //       console.log("Firebase initialized and user signed in:", userId);
-    //       // Aqui você configuraria os listeners do Firestore para dados do usuário e registro de treino
-    //     } catch (error) {
-    //       console.error("Erro ao inicializar Firebase ou autenticar:", error);
-    //     }
-    //   };
-    //   signIn();
-    // }
-  }, []); // Array de dependência vazio significa que isso é executado uma vez na montagem
-
-  return (
-    <div className="min-h-screen bg-[#00BFA6] font-sans text-[#212121] p-4 sm:p-6 lg:p-8 rounded-lg shadow-lg">
-      {/* Cabeçalho do Painel */}
-      <header className="mb-8 text-center">
-        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-white drop-shadow-lg rounded-lg p-4 bg-[#212121] bg-opacity-80">
-          O GUIA COMPLETO PARA CORREDORES
-        </h1>
-        <p className="text-xl sm:text-2xl text-white mt-2">Edição Projeto Ampaulo</p>
-      </header>
-
-      {/* Grade de Conteúdo Principal */}
-      <main className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Perfil do Usuário e Estatísticas - Coluna Esquerda */}
-        <section className="lg:col-span-1 bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
-          <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
-            <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"></path></svg>
-            Seu Perfil
-          </h2>
-          <div className="space-y-3 text-lg">
-            <p><span className="font-semibold">Nome:</span> {userData.name}</p>
-            <p><span className="font-semibold">Nível:</span> {userData.level}</p>
-            <p><span className="font-semibold">Corridas Totais:</span> {userData.totalRuns}</p>
-            <p><span className="font-semibold">Distância Total:</span> {userData.totalDistance} km</p>
-            <p><span className="font-semibold">Ritmo Médio:</span> {userData.avgPace}</p>
-          </div>
-          <button className="mt-6 w-full bg-[#FF6B6B] hover:bg-[#FFA726] text-white font-bold py-3 px-4 rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105">
-            Editar Perfil
-          </button>
-        </section>
-
-        {/* Conteúdo Principal com Abas - Colunas do Meio e Direita */}
-        <div className="lg:col-span-2 grid grid-cols-1 gap-6">
-          {/* Navegação por Abas */}
-          <div className="flex justify-center mb-4 space-x-2">
-            <button
-              className={`py-2 px-4 rounded-lg font-bold transition duration-300 ease-in-out ${
-                activeTab === 'trimestral'
-                  ? 'bg-[#FF6B6B] text-white shadow-lg'
-                  : 'bg-white text-[#212121] hover:bg-gray-100'
-              }`}
-              onClick={() => setActiveTab('trimestral')}
-            >
-              Trimestral
-            </button>
-            <button
-              className={`py-2 px-4 rounded-lg font-bold transition duration-300 ease-in-out ${
-                activeTab === 'mensal'
-                  ? 'bg-[#FF6B6B] text-white shadow-lg'
-                  : 'bg-white text-[#212121] hover:bg-gray-100'
-              }`}
-              onClick={() => setActiveTab('mensal')}
-            >
-              Mensal
-            </button>
-            <button
-              className={`py-2 px-4 rounded-lg font-bold transition duration-300 ease-in-out ${
-                activeTab === 'semanal'
-                  ? 'bg-[#FF6B6B] text-white shadow-lg'
-                  : 'bg-white text-[#212121] hover:bg-gray-100'
-              }`}
-              onClick={() => setActiveTab('semanal')}
-            >
-              Semanal
-            </button>
-          </div>
-
-          {/* Conteúdo da Aba Trimestral */}
-          {activeTab === 'trimestral' && (
-            <section className="bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
-              <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
-                <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M3 6a3 3 0 013-3h10a2 2 0 012 2v8a2 2 0 01-2 2H6a3 3 0 01-3-3V6zm4 0a1 1 0 011 1v3a1 1 0 11-2 0V7a1 1 0 011-1zm6 0a1 1 0 011 1v3a1 1 0 11-2 0V7a1 1 0 011-1z" clipRule="evenodd"></path></svg>
-                Visão Trimestral
-              </h2>
-              {Object.keys(quarterlyFocus).sort().map(quarterKey => (
-                <div key={quarterKey} className="mb-4 p-4 bg-[#00BFA6] bg-opacity-10 rounded-lg border border-[#00BFA6] shadow-sm">
-                  <h3 className="text-xl font-bold text-[#212121] mb-2">{quarterlyFocus[quarterKey].title}</h3>
-                  <p className="text-lg mb-3">{quarterlyFocus[quarterKey].description}</p>
-                  <ul className="list-disc list-inside space-y-1">
-                    {quarterlyFocus[quarterKey].months.map((month, index) => (
-                      <li key={index} className="text-lg">
-                        <span className="font-semibold">{month.name}:</span> {month.focus}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </section>
-          )}
-
-          {/* Conteúdo da Aba Mensal (Histórico de Treinos) */}
-          {activeTab === 'mensal' && (
-            <section className="bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
-              <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
-                <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"></path></svg>
-                Histórico de Treinos Mensal
-              </h2>
-              {/* Ordena os meses do mais recente para o mais antigo */}
-              {Object.keys(groupedTrainingLogByMonth).sort((a,b) => new Date(b) - new Date(a)).map(monthKey => {
-                const monthData = groupedTrainingLogByMonth[monthKey];
-                const monthName = monthData.displayName.toUpperCase(); // NOME DO MÊS EM MAIÚSCULAS
-                const entriesForThisMonth = monthData.entries;
-
-                // Filtra os feriados que pertencem a este mês
-                const monthHolidays = holidays.filter(h => h.date.startsWith(monthKey));
-                
-                // Agrupa os treinos do mês atual por semana para exibição
-                const weeksInMonth = {};
-                entriesForThisMonth.forEach(entry => {
-                  const { sunday, saturday } = getWeekRangeSundayStart(entry.date);
-                  const weekKey = `${sunday}_${saturday}`;
-                  if (!weeksInMonth[weekKey]) {
-                    weeksInMonth[weekKey] = [];
-                  }
-                  weeksInMonth[weekKey].push(entry);
-                });
-
-                return (
-                  <div key={monthKey} className="mb-4">
-                    <button
-                      onClick={() => setActiveMonth(activeMonth === monthKey ? null : monthKey)}
-                      className="w-full text-left bg-[#00BFA6] bg-opacity-30 hover:bg-[#00BFA6] hover:bg-opacity-50 text-[#212121] font-bold py-3 px-4 rounded-lg shadow-md transition duration-200 ease-in-out flex justify-between items-center"
-                    >
-                      <span>{monthName}</span>
-                      <svg className={`w-5 h-5 transition-transform ${activeMonth === monthKey ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"></path></svg>
+        .run-content-section {
+            display: none;
+        }
+        .run-content-section.active {
+            display: block;
+            animation: fadeIn 0.5s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+    <div id="app" class="max-w-7xl mx-auto p-4">
+        <!-- Cabeçalho e Navegação -->
+        <header class="bg-white rounded-xl shadow p-4 mb-6">
+            <div class="flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0">
+                <h1 class="text-xl font-bold text-slate-800">Painel Família</h1>
+                <div id="main-nav" class="flex flex-wrap justify-center sm:justify-start gap-2 sm:gap-4">
+                    <button data-target="home" class="nav-button active flex items-center space-x-2">
+                        <i data-lucide="home"></i> <span class="hidden sm:inline">Home</span>
                     </button>
-                    {activeMonth === monthKey && (
-                      <div className="mt-2 ml-4 border-l-2 border-[#00BFA6] pl-4">
-                        {/* Exibir Feriados do Mês */}
-                        {monthHolidays.length > 0 && (
-                          <div className="mb-4 p-3 bg-red-100 rounded-md border border-red-300 text-red-800">
-                            <h4 className="font-semibold mb-2">FERIADOS EM {monthName.split(' ')[0]}:</h4>
-                            <ul className="list-disc list-inside">
-                              {monthHolidays.map((holiday, hIdx) => (
-                                <li key={hIdx}>{formatDate(holiday.date)} - {holiday.name}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-
-                        {/* Ordena as semanas do mais recente para o mais antigo */}
-                        {Object.keys(weeksInMonth).sort((a,b) => new Date(b.split('_')[0]) - new Date(a.split('_')[0])).map(weekKey => {
-                          const [sundayStr, saturdayStr] = weekKey.split('_');
-                          const weekEntries = weeksInMonth[weekKey];
-
-                          return (
-                            <div key={weekKey} className="mb-2">
-                              <button
-                                onClick={() => setActiveWeek(activeWeek === weekKey ? null : weekKey)}
-                                className="w-full text-left bg-[#C6FF00] bg-opacity-20 hover:bg-[#C6FF00] hover:bg-opacity-40 text-[#212121] font-semibold py-2 px-3 rounded-md transition duration-200 ease-in-out flex justify-between items-center"
-                              >
-                                <span>SEMANA: {formatDate(sundayStr)} - {formatDate(saturdayStr)}</span>
-                                <svg className={`w-5 h-5 transition-transform ${activeWeek === weekKey ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"></path></svg>
-                              </button>
-                              {activeWeek === weekKey && (
-                                <div className="mt-1 ml-4 border-l-2 border-[#C6FF00] pl-4">
-                                  {/* Ordena os treinos do mais antigo para o mais recente */}
-                                  {weekEntries.sort((a,b) => new Date(a.date) - new Date(b.date)).map(entry => (
-                                    <div key={entry.id} className="mb-1">
-                                      <button
-                                        onClick={() => setExpandedDay(expandedDay === entry.date ? null : entry.date)}
-                                        className="w-full text-left bg-white hover:bg-gray-100 text-[#212121] py-2 px-3 rounded-md transition duration-200 ease-in-out flex justify-between items-center"
-                                      >
-                                        <span>{formatDate(entry.date)} - {entry.distance} km ({entry.time})</span>
-                                        <svg className={`w-5 h-5 transition-transform ${expandedDay === entry.date ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"></path></svg>
-                                      </button>
-                                      {expandedDay === entry.date && (
-                                        <div className="mt-1 ml-4 p-3 bg-white rounded-md border border-gray-200 text-[#212121]">
-                                          <p className="mb-2"><span className="font-medium">Notas:</span> {entry.notes}</p>
-                                          {entry.detailedWorkout && entry.detailedWorkout.length > 0 && (
-                                            <div className="overflow-x-auto mt-2">
-                                              <table className="min-w-full bg-white rounded-lg shadow-sm">
-                                                <thead>
-                                                  <tr className="bg-[#C6FF00] bg-opacity-20 text-[#212121] uppercase text-xs leading-normal">
-                                                    <th className="py-2 px-4 text-left">Km</th>
-                                                    <th className="py-2 px-4 text-left">Etapa</th>
-                                                    <th className="py-2 px-4 text-left">Pace</th>
-                                                    <th className="py-2 px-4 text-left">Zona</th>
-                                                    <th className="py-2 px-4 text-left">Observações</th>
-                                                  </tr>
-                                                </thead>
-                                                <tbody className="text-[#212121] text-sm font-light">
-                                                  {entry.detailedWorkout.map((detail, idx) => (
-                                                    <tr key={idx} className="border-b border-gray-200 hover:bg-gray-50">
-                                                      <td className="py-2 px-4 whitespace-nowrap">{detail.km}</td>
-                                                      <td className="py-2 px-4 whitespace-nowrap">{detail.step}</td>
-                                                      <td className="py-2 px-4 whitespace-nowrap">{detail.pace}</td>
-                                                      <td className="py-2 px-4 whitespace-nowrap">{detail.zone}</td>
-                                                      <td className="py-2 px-4">{detail.observations}</td>
-                                                    </tr>
-                                                  ))}
-                                                </tbody>
-                                              </table>
-                                            </div>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </section>
-          )}
-
-          {/* Conteúdo da Aba Semanal (Treino da Semana Atual) */}
-          {activeTab === 'semanal' && (
-            <section className="bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
-              <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
-                <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"></path><path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 000-2H7zm3 0a1 1 0 000 2h.01a1 1 0 000-2H10zm3 0a1 1 0 000 2h.01a1 1 0 000-2H13zm-3 4a1 1 0 000 2h.01a1 1 0 000-2H10zm3 0a1 1 0 000 2h.01a1 1 0 000-2H13z" clipRule="evenodd"></path></svg>
-                Treino da Semana
-              </h2>
-              {/* Dropdowns para selecionar Mês e Semana */}
-              <div className="flex flex-col sm:flex-row gap-4 mb-4">
-                <select
-                  className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00] flex-grow"
-                  onChange={(e) => {
-                    setActiveMonth(e.target.value);
-                    setActiveWeek(null); // Reseta a semana quando o mês muda
-                    setExpandedDay(null); // Reseta o dia quando o mês muda
-                  }}
-                  value={activeMonth || ''}
-                >
-                  <option value="">SELECIONE UM MÊS</option>
-                  {/* Usa groupedTrainingLogByMonth para as chaves dos meses */}
-                  {Object.keys(groupedTrainingLogByMonth).sort((a,b) => new Date(b) - new Date(a)).map(monthKey => (
-                    <option key={monthKey} value={monthKey}>
-                      {groupedTrainingLogByMonth[monthKey].displayName.toUpperCase()} {/* NOME DO MÊS EM MAIÚSCULAS */}
-                    </option>
-                  ))}
-                </select>
-
-                {activeMonth && (
-                  <select
-                    className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00] flex-grow"
-                    onChange={(e) => {
-                      setActiveWeek(e.target.value);
-                      setExpandedDay(null); // Reseta o dia quando a semana muda
-                    }}
-                    value={activeWeek || ''}
-                  >
-                    <option value="">SELECIONE UMA SEMANA</option>
-                    {/* Gera chaves de semana com base nas entradas do mês ativo */}
-                    {(() => {
-                      const weeksInSelectedMonth = {};
-                      if (groupedTrainingLogByMonth[activeMonth]) {
-                        groupedTrainingLogByMonth[activeMonth].entries.forEach(entry => {
-                          const { sunday, saturday } = getWeekRangeSundayStart(entry.date);
-                          const weekKey = `${sunday}_${saturday}`;
-                          weeksInSelectedMonth[weekKey] = true; // Usa uma estrutura tipo set para chaves únicas
-                        });
-                      }
-                      return Object.keys(weeksInSelectedMonth).sort((a,b) => new Date(b.split('_')[0]) - new Date(a.split('_')[0])).map(weekKey => {
-                        const [sundayStr, saturdayStr] = weekKey.split('_');
-                        return (
-                          <option key={weekKey} value={weekKey}>
-                            {formatDate(sundayStr)} - {formatDate(saturdayStr)}
-                          </option>
-                        );
-                      });
-                    })()}
-                  </select>
-                )}
-              </div>
-
-              {activeMonth && activeWeek ? (
-                <ul className="space-y-3">
-                  {groupedTrainingLogByMonth[activeMonth].entries
-                    .filter(entry => {
-                      const { sunday, saturday } = getWeekRangeSundayStart(entry.date);
-                      return `${sunday}_${saturday}` === activeWeek;
-                    })
-                    .sort((a,b) => new Date(a.date) - new Date(b.date))
-                    .map(entry => (
-                      <li key={entry.id} className="bg-[#00BFA6] bg-opacity-10 p-4 rounded-lg border border-[#00BFA6] shadow-sm">
-                        <button
-                          onClick={() => setExpandedDay(expandedDay === entry.date ? null : entry.date)}
-                          className="w-full text-left font-semibold text-lg text-[#212121] flex justify-between items-center"
-                        >
-                          <span>{formatDate(entry.date)} - {entry.distance} km ({entry.time})</span>
-                          <svg className={`w-5 h-5 transition-transform ${expandedDay === entry.date ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"></path></svg>
-                        </button>
-                        {expandedDay === entry.date && (
-                          <div className="mt-3 text-[#212121]">
-                            <p className="mb-2"><span className="font-medium">Notas:</span> {entry.notes}</p>
-                            {entry.detailedWorkout && entry.detailedWorkout.length > 0 && (
-                              <div className="overflow-x-auto mt-2">
-                                <table className="min-w-full bg-white rounded-lg shadow-sm">
-                                  <thead>
-                                    <tr className="bg-[#C6FF00] bg-opacity-20 text-[#212121] uppercase text-xs leading-normal">
-                                      <th className="py-2 px-4 text-left">Km</th>
-                                      <th className="py-2 px-4 text-left">Etapa</th>
-                                      <th className="py-2 px-4 text-left">Pace</th>
-                                      <th className="py-2 px-4 text-left">Zona</th>
-                                      <th className="py-2 px-4 text-left">Observações</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="text-[#212121] text-sm font-light">
-                                    {entry.detailedWorkout.map((detail, idx) => (
-                                      <tr key={idx} className="border-b border-gray-200 hover:bg-gray-50">
-                                        <td className="py-2 px-4 whitespace-nowrap">{detail.km}</td>
-                                        <td className="py-2 px-4 whitespace-nowrap">{detail.step}</td>
-                                        <td className="py-2 px-4 whitespace-nowrap">{detail.pace}</td>
-                                        <td className="py-2 px-4 whitespace-nowrap">{detail.zone}</td>
-                                        <td className="py-2 px-4">{detail.observations}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                </ul>
-              ) : (
-                <p className="text-gray-600">Selecione um mês e uma semana para ver os treinos.</p>
-              )}
-            </section>
-          )}
-
-          {/* Formulário para Adicionar Novo Treino (Visível em todas as abas, ou pode ser movido) */}
-          <section className="bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
-            <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
-              <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"></path><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd"></path></svg>
-              Adicionar Novo Treino
-            </h2>
-            <form onSubmit={addLogEntry} className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 p-4 bg-[#00BFA6] bg-opacity-10 rounded-lg border border-[#00BFA6]">
-              <input
-                type="date"
-                name="date"
-                value={newLogEntry.date}
-                onChange={handleInputChange}
-                className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00]"
-                placeholder="Data"
-                required
-              />
-              <input
-                type="number"
-                name="distance"
-                value={newLogEntry.distance}
-                onChange={handleInputChange}
-                className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00]"
-                placeholder="Distância (km)"
-                step="0.1"
-                required
-              />
-              <input
-                type="text"
-                name="time"
-                value={newLogEntry.time}
-                onChange={handleInputChange}
-                className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00]"
-                placeholder="Tempo (ex: 30:00)"
-                required
-              />
-              <input
-                type="text"
-                name="pace"
-                value={newLogEntry.pace}
-                onChange={handleInputChange}
-                className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00]"
-                placeholder="Ritmo (ex: 5:30)"
-              />
-              <textarea
-                name="notes"
-                value={newLogEntry.notes}
-                onChange={handleInputChange}
-                className="p-2 border border-[#00BFA6] rounded-md focus:ring-2 focus:ring-[#C6FF00] col-span-full"
-                placeholder="Notas do treino..."
-                rows="2"
-              ></textarea>
-              <button
-                type="submit"
-                className="col-span-full bg-[#FF6B6B] hover:bg-[#FFA726] text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105"
-              >
-                Adicionar Treino
-              </button>
-            </form>
-          </section>
-
-          {/* Seção de Zonas de Ritmo */}
-          <section className="bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
-            <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
-              <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M3 6a3 3 0 013-3h10a2 2 0 012 2v8a2 2 0 01-2 2H6a3 3 0 01-3-3V6zm4 0a1 1 0 011 1v3a1 1 0 11-2 0V7a1 1 0 011-1zm6 0a1 1 0 011 1v3a1 1 0 11-2 0V7a1 1 0 011-1z" clipRule="evenodd"></path></svg>
-              Definições de Ritmo de Corrida (Pace Zones)
-            </h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full bg-white rounded-lg shadow-sm">
-                <thead>
-                  <tr className="bg-[#00BFA6] text-white uppercase text-sm leading-normal">
-                    <th className="py-3 px-6 text-left">Zona</th>
-                    <th className="py-3 px-6 text-left">Pace Min/Km</th>
-                    <th className="py-3 px-6 text-left">Pace Max/Km</th>
-                    <th className="py-3 px-6 text-left">Km/h (aprox.)</th>
-                    <th className="py-3 px-6 text-left">Descrição</th>
-                  </tr>
-                </thead>
-                <tbody className="text-[#212121] text-sm font-light">
-                  {paceZones.map((zone, index) => (
-                    <tr key={index} className="border-b border-gray-200 hover:bg-gray-100">
-                      <td className="py-3 px-6 text-left whitespace-nowrap">{zone.zone}</td>
-                      <td className="py-3 px-6 text-left">{zone.paceMin}</td>
-                      <td className="py-3 px-6 text-left">{zone.paceMax}</td>
-                      <td className="py-3 px-6 text-left">{zone.kmhApprox}</td>
-                      <td className="py-3 px-6 text-left">{zone.description}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                    <button data-target="amanha" class="nav-button flex items-center space-x-2">
+                        <i data-lucide="calendar-plus"></i> <span class="hidden sm:inline">Amanhã</span>
+                    </button>
+                    <button data-target="treino" class="nav-button flex items-center space-x-2">
+                        <i data-lucide="dumbbell"></i> <span class="hidden sm:inline">Treino</span>
+                    </button>
+                     <button data-target="corrida" class="nav-button flex items-center space-x-2">
+                        <i data-lucide="run"></i> <span class="hidden sm:inline">Corrida</span>
+                    </button>
+                    <button data-target="nutricao" class="nav-button flex items-center space-x-2">
+                        <i data-lucide="apple"></i> <span class="hidden sm:inline">Nutrição</span>
+                    </button>
+                    <button data-target="progresso" class="nav-button flex items-center space-x-2">
+                        <i data-lucide="bar-chart-3"></i> <span class="hidden sm:inline">Progresso</span>
+                    </button>
+                    <button data-target="calendario" class="nav-button flex items-center space-x-2">
+                        <i data-lucide="calendar-days"></i> <span class="hidden sm:inline">Calendário</span>
+                    </button>
+                    <button data-target="financas" class="nav-button flex items-center space-x-2">
+                        <i data-lucide="dollar-sign"></i> <span class="hidden sm:inline">Finanças</span>
+                    </button>
+                    <button data-target="prog-distancia" class="nav-button flex items-center space-x-2">
+                        <i data-lucide="flag"></i> <span class="hidden sm:inline">Progressão</span>
+                    </button>
+                </div>
             </div>
-          </section>
+        </header>
 
-          {/* Acompanhamento de Progresso (Placeholder para Gráfico) */}
-          <section className="bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
-            <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
-              <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"></path><path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"></path></svg>
-              Acompanhamento de Progresso
-            </h2>
-            <div className="bg-gray-50 p-4 rounded-lg text-center text-gray-600 h-48 flex items-center justify-center">
-              <p>Gráfico de progresso (distância, ritmo, etc.) será exibido aqui.</p>
-              {/* Futura integração com uma biblioteca de gráficos como Recharts */}
-            </div>
-          </section>
-        </div>
-      </main>
-
-      {/* Dicas para Corredores - Seção Inferior */}
-      <section className="mt-6 bg-white bg-opacity-90 p-6 rounded-xl shadow-md border border-[#C6FF00]">
-        <h2 className="text-2xl font-bold text-[#212121] mb-4 flex items-center">
-          <svg className="w-6 h-6 mr-2 text-[#FFA726]" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-6a1 1 0 00-.894.553L7.382 10H4a1 1 0 000 2h3.382l-1.498 3.447A1 1 0 007 16h6a1 1 0 00.894-.553L12.618 10H16a1 1 0 000-2h-3.382l1.498-3.447A1 1 0 0013 4H7z" clipRule="evenodd"></path></svg>
-          Dicas para Corredores
-        </h2>
-        <ul className="list-disc list-inside space-y-2 text-lg text-[#212121]">
-          {runningTips.map((tip, index) => (
-            <li key={index}>{tip}</li>
-          ))}
-        </ul>
-      </section>
-
-      {/* Rodapé */}
-      <footer className="mt-8 text-center text-[#212121] text-sm">
-        <p>&copy; 2025 O Guia Completo para Corredores. Todos os direitos reservados.</p>
-      </footer>
+        <!-- Conteúdo Principal -->
+        <main>
+            <div id="home" class="view active"></div>
+            <div id="amanha" class="view"></div>
+            <div id="treino" class="view"></div>
+            <div id="corrida" class="view"></div>
+            <div id="prog-distancia" class="view"></div>
+            <div id="nutricao" class="view"></div>
+            <div id="progresso" class="view"></div>
+            <div id="calendario" class="view"></div>
+            <div id="financas" class="view"></div>
+        </main>
     </div>
-  );
-};
 
-export default App;
+    <!-- Modal -->
+    <div id="calendar-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl p-6 m-4 max-w-2xl w-full">
+            <h3 id="modal-title" class="text-xl font-bold text-teal-700"></h3>
+            <div id="modal-activity" class="text-slate-600 mt-2"></div>
+            <p id="modal-motivation" class="text-slate-500 mt-4"></p>
+            <p id="modal-verse-ref" class="text-slate-500 italic mt-2"></p>
+            <div id="modal-finances" class="mt-4 pt-4 border-t border-slate-200"></div>
+            <button id="modal-close" class="mt-6 w-full bg-teal-600 text-white font-semibold py-2 px-4 rounded-lg">Fechar</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+        // --- HELPERS & GLOBAL CONFIGURATION ---
+        function getDayName(date) {
+            const weekdays = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+            return weekdays[date.getDay()];
+        }
+
+        function getMonthName(date) {
+            const months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+            return months[date.getMonth()];
+        }
+
+        function getLastSaturday(year, month) {
+            const date = new Date(year, month + 1, 0); // Last day of the month
+            date.setDate(date.getDate() - (date.getDay() + 1) % 7); // Go back to the last Saturday
+            return date;
+        }
+
+        // --- DATA STORE (Project Data) ---
+        const projectData = {
+            virtualCoach: {
+                paceZones: {
+                    Z1: { name: "Z1 – Recuperação leve", description: "Recuperação leve" },
+                    Z2: { name: "Z2 – Corrida fácil / base aeróbica", description: "Corrida fácil / base aeróbica" },
+                    Z3: { name: "Z3 – Ritmo de limiar baixo / tempo run", description: "Ritmo de limiar baixo / tempo run" },
+                    Z4: { name: "Z4 – Ritmo de limiar alto / VO₂ submáx", description: "Ritmo de limiar alto / VO₂ submáx" },
+                    Z5: { name: "Z5 – Intervalos curtos / VO₂ máx", description: "Intervalos curtos / VO₂ máx" }
+                },
+                trainingTypes: {
+                    intervalado: {
+                        name: "Treino 1: Intervalado",
+                        description: "4x800m forte + 400m trote",
+                        baseDistance: 7.8, // Added for scaling calculation
+                        structure: [
+                            { phase: "Aquecimento", distance: 1.0, zone: "Z1", description: "Preparação corporal" },
+                            { phase: "Aquecimento", distance: 1.0, zone: "Z2", description: "Ativação gradual" },
+                            { phase: "Série 1 - 800m", distance: 0.8, zone: "Z4", description: "Primeira série forte" },
+                            { phase: "Recuperação 1 - 400m", distance: 0.4, zone: "Z2", description: "Trote de recuperação" },
+                            { phase: "Série 2 - 800m", distance: 0.8, zone: "Z4", description: "Segunda série forte" },
+                            { phase: "Recuperação 2 - 400m", distance: 0.4, zone: "Z2", description: "Trote de recuperação" },
+                            { phase: "Série 3 - 800m", distance: 0.8, zone: "Z4", description: "Terceira série forte" },
+                            { phase: "Recuperação 3 - 400m", distance: 0.4, zone: "Z2", description: "Trote de recuperação" },
+                            { phase: "Série 4 - 800m", distance: 0.8, zone: "Z4", description: "Quarta série forte" },
+                            { phase: "Recuperação 4 - 400m", distance: 0.4, zone: "Z2", description: "Trote de recuperação" },
+                            { phase: "Desaquecimento", distance: 1.0, zone: "Z1", description: "Volta à calma" }
+                        ]
+                    },
+                    ritmo: {
+                        name: "Treino 2: Ritmo",
+                        description: "5km de ritmo contínuo",
+                        baseDistance: 7.0, // Added for scaling calculation
+                        structure: [
+                            { phase: "Aquecimento", distance: 1.0, zone: "Z1", description: "Preparação" },
+                            { phase: "Ritmo 1/5", distance: 1.0, zone: "Z3", description: "Ritmo moderado sustentado" },
+                            { phase: "Ritmo 2/5", distance: 1.0, zone: "Z3", description: "Ritmo moderado sustentado" },
+                            { phase: "Ritmo 3/5", distance: 1.0, zone: "Z3", description: "Ritmo moderado sustentado" },
+                            { phase: "Ritmo 4/5", distance: 1.0, zone: "Z3", description: "Ritmo moderado sustentado" },
+                            { phase: "Ritmo 5/5", distance: 1.0, zone: "Z3", description: "Ritmo moderado sustentado" },
+                            { phase: "Desaquecimento", distance: 1.0, zone: "Z1", description: "Volta à calma" }
+                        ]
+                    },
+                    longao: {
+                        name: "Treino 3: Longão",
+                        description: "Distância variável, ritmo leve",
+                        baseDistance: 11, // August 2025
+                        monthlyIncrease: 1,
+                        startMonth: 7, // August (0-indexed)
+                        startYear: 2025
+                    },
+                    progressivo: {
+                        name: "Treino 4: Progressivo",
+                        description: "Começa leve, termina mais rápido",
+                        baseDistance: 6.0, // Added for scaling calculation
+                        structure: [
+                            { phase: "Aquecimento", distance: 1.0, zone: "Z1", description: "Preparação" },
+                            { phase: "Progressão 1", distance: 1.0, zone: "Z2", description: "Início leve" },
+                            { phase: "Progressão 2", distance: 1.0, zone: "Z3", description: "Aceleração gradual" },
+                            { phase: "Progressão 3", distance: 1.0, zone: "Z4", description: "Ritmo forte" },
+                            { phase: "Progressão 4", distance: 1.0, zone: "Z4", description: "Manutenção forte" },
+                            { phase: "Desaquecimento", distance: 1.0, zone: "Z1", description: "Volta à calma" }
+                        ]
+                    },
+                    fartlek: {
+                        name: "Treino 5: Fartlek",
+                        description: "Treino progressivo de ritmo",
+                        baseDistance: 7.0, // Added for scaling calculation
+                        structure: [
+                            { phase: "Aquecimento", distance: 1.0, zone: "Z1", description: "Preparação" },
+                            { phase: "Bloco 1", distance: 1.0, zone: "Z2", description: "Ritmo leve e constante" },
+                            { phase: "Bloco 2", distance: 1.0, zone: "Z3", description: "Aumenta para moderado" },
+                            { phase: "Bloco 3", distance: 1.0, zone: "Z4", description: "Aperta para ritmo forte" },
+                            { phase: "Bloco 4", distance: 1.0, zone: "Z3", description: "Reduz para moderado" },
+                            { phase: "Bloco 5", distance: 1.0, zone: "Z2", description: "Volta para ritmo leve" },
+                            { phase: "Desaquecimento", distance: 1.0, zone: "Z1", description: "Volta à calma" }
+                        ]
+                    }
+                },
+                currentWeek: 1, // Alternates between 1 and 2
+                lastGeneratedDate: null
+            },
+            progDistancia: {
+                title: "🎯 PROGRESSÃO DE PACE E DISTÂNCIA",
+                description: "Gere seu plano de treino semanal e acompanhe sua evolução para alcançar novas distâncias e ritmos. A corrida alvo de cada mês será no último sábado.",
+                goals: [
+                    { month: 7, year: 2025, distance: 11, label: "Agosto" },
+                    { month: 8, year: 2025, distance: 12, label: "Setembro" },
+                    { month: 9, year: 2025, distance: 13, label: "Outubro" },
+                    { month: 10, year: 2025, distance: 14, label: "Novembro" },
+                    { month: 11, year: 2025, distance: 15, label: "Dezembro" }
+                ]
+            },
+            workouts: {
+                quarta_inferiores_b: { key: "quarta_inferiores_b", title: "TREINO INFERIORES B – QUARTA-FEIRA (28 SÉRIES)", series: 28, objective: "Foco: Quadríceps, Core e Lombar", groups: [ { name: "Quadríceps", series: 12, exercises: [ { name: "Agachamento com Barra", sets: "4 séries" }, { name: "Afundo com Halteres", sets: "4 séries" }, { name: "Avanço com Halteres", sets: "4 séries" } ] }, { name: "Core/Abdômen", series: 12, exercises: [ { name: "Abdominal Bicicleta", sets: "4 séries" }, { name: "Elevação de Pernas", sets: "4 séries" }, { name: "Crunch Reto", sets: "4 séries" } ] }, { name: "Lombar", series: 4, exercises: [ { name: "Superman (Hiperextensão)", sets: "4 séries" } ] } ] },
+                sexta_peito_triceps: { key: "sexta_peito_triceps", title: "TREINO PEITO + TRÍCEPS – SEXTA-FEIRA (27 SÉRIES)", series: 27, objective: "Desenvolver força e volume do peitoral e tríceps.", groups: [ { name: "Peitoral", series: 18, exercises: [ { name: "Supino com Barra", sets: "4 séries" }, { name: "Supino Inclinado com Barra", sets: "4 séries" }, { name: "Crucifixofixo Reto com Halteres", sets: "4 séries" }, { name: "Voador em Pé no Cabo", sets: "3 séries" }, { name: "Voador Curvado em Pé no Cabo", sets: "3 séries" } ] }, { name: "Tríceps", series: 9, exercises: [ { name: "Tríceps Francês com Halteres", sets: "3 séries" }, { name: "Tríceps Invertido na Polia", sets: "3 séries" }, { name: "Tríceps na Polia", sets: "3 séries" } ] } ] },
+                sabado_ombros_trapezio: { key: "sabado_ombros_trapezio", title: "TREINO OMBROS + TRAPÉZIO – SÁBADO (27 SÉRIES)", series: 27, objective: "Desenvolver ombros largos e trapézio definido.", groups: [ { name: "Ombros", series: 18, exercises: [ { name: "Elevação Lateral com Halteres", sets: "3 séries" }, { name: "Elevação Frontal com Placa", sets: "3 séries" }, { name: "Elevação Frontal com Barra", sets: "3 séries" }, { name: "Desenvolvimento com Barra", sets: "3 séries" }, { name: "Crucifixo Inverso com Halteres", sets: "3 séries" }, { name: "Puxada no Rosto no Cabo", sets: "3 séries" } ] }, { name: "Trapézio", series: 9, exercises: [ { name: "Encolhimento de Ombros com Halteres", sets: "3 séries" }, { name: "Remada para Cima com Barra", sets: "3 séries" }, { name: "Remada Alta com Barra", sets: "3 séries" } ] } ] },
+                domingo_inferiores_a: { key: "domingo_inferiores_a", title: "TREINO INFERIORES A – DOMINGO (30 SÉRIES)", series: 30, objective: "Foco: Glúteo, Quadríceps, Posteriores e Core", groups: [ { name: "Glúteos", series: 6, exercises: [ { name: "Hip Thrust com Barra", sets: "3 séries" }, { name: "Agachamento Sumô com Barra", sets: "3 séries" } ] }, { name: "Posterior de Coxa", series: 6, exercises: [ { name: "Levantamento Terra com Barra", sets: "3 séries" }, { name: "Stiff com Halteres", sets: "3 séries" } ] }, { name: "Panturrilhas", series: 6, exercises: [ { name: "Panturrilha no Step com Halteres", sets: "3 séries" }, { name: "Panturrilha no Smith", sets: "3 séries" } ] }, { name: "Core/Abdômen", series: 12, exercises: [ { name: "Elevação de Pernas", sets: "4 séries" }, { name: "Crunch Reto", sets: "4 séries" }, { name: "Abdominal Bicicleta", sets: "4 séries" } ] } ] },
+                segunda_costas_antebraco_biceps: { key: "segunda_costas_antebraco_biceps", title: "TREINO COSTAS + ANTEBRAÇO + BÍCEPS – SEGUNDA-FEIRA (30 SÉRIES)", series: 30, objective: "Desenvolver força e volume em costas, antebraços e bíceps.", groups: [ { name: "Costas", series: 20, exercises: [ { name: "Remada Curvada com Barra", sets: "4 séries" }, { name: "Remada Curvada (Pegada Invertida)", sets: "4 séries" }, { name: "Puxada Lateral (Pegada Aberta)", sets: "4 séries" }, { name: "Puxada Lateral (Pegada Invertida)", sets: "4 séries" }, { name: "Remada Sentado no Cabo", sets: "4 séries" } ] }, { name: "Antebraço", series: 4, exercises: [ { name: "Rosca Punho", sets: "2 séries" }, { name: "Rosca Inversa", sets: "2 séries" } ] }, { name: "Bíceps", series: 6, exercises: [ { name: "Rosca Direta com Barra", sets: "3 séries" }, { name: "Rosca Alternada com Halteres", sets: "3 séries" } ] } ] }
+            },
+            runs: {
+                paceDefinitionsAmpaulo: [ 
+                    { name: "Z1 – Recuperação leve", min_km: "6:29", max_km: "7:19", min_kmh: 8.20, max_kmh: 9.25, description: "Recuperação leve" },
+                    { name: "Z2 – Corrida fácil / base aeróbica", min_km: "5:55", max_km: "6:29", min_kmh: 9.25, max_kmh: 10.14, description: "Corrida fácil / base aeróbica" },
+                    { name: "Z3 – Ritmo de limiar baixo / tempo run", min_km: "5:31", max_km: "5:55", min_kmh: 10.14, max_kmh: 10.88, description: "Ritmo de limiar baixo / tempo run" },
+                    { name: "Z4 – Ritmo de limiar alto / VO₂ submáx", min_km: "5:05", max_km: "5:31", min_kmh: 10.88, max_kmh: 11.80, description: "Ritmo de limiar alto / VO₂ submáx" },
+                    { name: "Z5 – Intervalos curtos / VO₂ máx", min_km: "4:31", max_km: "5:05", min_kmh: 11.80, max_kmh: 13.28, description: "Intervalos curtos / VO₂ máx" }
+                ],
+                paceDefinitionsEloisa: [ { name: "Zona 1 (Z1) - Recuperação Ativa", min_km: "8:31", max_km: "9:30", min_kmh: 6.31, max_kmh: 7.05, description: "Ritmo muito leve" }, { name: "Zona 2 (Z2) - Ritmo Leve", min_km: "7:45", max_km: "8:30", min_kmh: 7.06, max_kmh: 7.74, description: "Conversa confortável" }, { name: "Zona 3 (Z3) - Ritmo Moderado", min_km: "7:00", max_km: "7:30", min_kmh: 8.00, max_kmh: 8.57, description: "Conversa um pouco difícil" }, { name: "Zona 4 (Z4) - Ritmo Forte", min_km: "6:00", max_km: "6:30", min_kmh: 9.23, max_kmh: 10.00, description: "Alta intensidade, respiração ofegante" }, { name: "Zona 5 (Z5) - Ritmo Máximo/Sprint", min_km: "5:00", max_km: "5:59", min_kmh: 10.01, max_kmh: 12.00, description: "Esforço máximo" } ],
+                // These will be dynamically updated by generateAndStoreScaledRunPlans()
+                // Initial empty objects are fine as they will be populated.
+                ampaulo_intervalado: {},
+                ampaulo_ritmo: {},
+                ampaulo_longao: {},
+                ampaulo_progressivo: {},
+                ampaulo_fartlek: {},
+                segunda_eloisa: { title: "🏃‍♀️ SEGUNDA – TREINO DE CORRIDA ELOÍSA (50 MIN)", stages: [ { name: "Aquecimento", duration: "10 min", pace: "Caminhada leve 🚶‍♀️" }, { name: "Parte Principal", duration: "8 ciclos de (1 min corrida leve 🏃‍♀️ + 2 min caminhada 🚶‍♀️)", pace: "Ritmo do corpo" }, { name: "Desaquecimento", duration: "6 min", pace: "Caminhada leve 🚶‍♀️" } ], total: { duration: "50 minutos", distance: "N/A" } },
+                quarta_eloisa: { title: "🏃‍♀️ QUARTA – TREINO DE CORRIDA ELOÍSA (50 MIN)", stages: [ { name: "Aquecimento", duration: "10 min", pace: "Caminhada leve 🚶‍♀️" }, { name: "Parte Principal", duration: "10 ciclos de (1 min 30s corrida 🏃‍♀️ + 2 min caminhada 🚶‍♀️)", pace: "Ritmo do corpo" }, { name: "Desaquecimento", duration: "5 min", pace: "Caminhada leve 🚶‍♀️" } ], total: { duration: "50 minutos", distance: "N/A" } },
+                sabado_eloisa: { title: "🏃‍♀️ SÁBADO – TREINO DE CORRIDA ELOÍSA (70 MIN)", stages: [ { name: "Aquecimento", duration: "10 min", pace: "Caminhada leve 🚶‍♀️" }, { name: "Parte Principal", duration: "10 ciclos de (2 min corrida 🏃‍♀️ + 2 min caminhada 🚶‍♀️)", pace: "Ritmo do corpo" }, { name: "Desaquecimento", duration: "10 min", pace: "Caminhada leve 🚶‍♀️" } ], total: { duration: "70 minutos", distance: "N/A" } }
+            },
+            nutrition: {
+                professional: "Kézia Rocha",
+                objective: "REEDUCAÇÃO ALIMENTAR / EMAGRECIMENTO / MELHORA DA IMUNIDADE",
+                generalInfo: [
+                    "Evitar refrigerante, excesso de doces, café com açúcar, embutidos, frituras, comidas gordurosas.",
+                    "Praticar exercício físico no mínimo 4x na semana.",
+                    "Hidratação diária: 3.4 litros. Aumentar o consumo gradualmente.",
+                    "Comer devagar, mastigar bem e prestar atenção aos sinais de saciedade.",
+                    "Permitido até duas refeições livres na semana (ex: pizza, hambúrguer, etc., com moderação)."
+                ],
+                meals: [
+                    { time: "08:00", name: "Café da Manhã", items: [
+                        { icon: '🥚', item: "Ovo de galinha", amount: "3 Unidades (150g)", notes: "Pode ser mexido, cozido, frito ou omelete.", substitutes: null },
+                        { icon: '🌽', item: "Cuscuz de milho cozido", amount: "200g", substitutes: "Banana da terra cozida (180g), Pão de forma (3 fatias, 75.4g), Pão francês (80g), Mandioca cozida (180g)" },
+                        { icon: '🍈', item: "Melão", amount: "300g", substitutes: "Banana prata (80g), Laranja (180g), Maçã (130g), Manga (120g), Uva (120g), Abacaxi (170g), Mamão (170g)" },
+                        { icon: '☕', item: "Café coado (suave)", amount: "1 Xícara (200ml)", substitutes: null }
+                    ]},
+                    { time: "12:10", name: "Almoço", items: [
+                        { icon: '🍚', item: "Arroz branco ou integral", amount: "8 Colheres de sopa (200g)", substitutes: "Batata inglesa cozida (480g)" },
+                        { icon: '🍲', item: "Feijão carioca/preto", amount: "1.5 Concha (210g)", substitutes: null },
+                        { icon: '🥦', item: "Legumes e vegetais ao vapor", amount: "4 colheres de sopa (120g)", substitutes: null },
+                        { icon: '🥗', item: "Salada colorida sem fruta", amount: "À vontade", substitutes: null },
+                        { icon: '🍗', item: "Peito de frango sem pele cozido", amount: "1.2 Filés médios (120g)", substitutes: "Sobrecoxa de frango (78g), Fígado bovino (90g), Carne magra refogada (110g), Coxa de frango (120g)" }
+                    ]},
+                    { time: "16:30", name: "Lanche", items: [
+                        { icon: '🍈', item: "Melão", amount: "300g", substitutes: "Banana prata (80g), Laranja (180g), Maçã (130g), Manga (120g), Uva (120g), Abacaxi (170g), Mamão (170g)" }
+                    ]},
+                    { time: "20:00", name: "Jantar", items: [
+                        { icon: '🌽', item: "Cuscuz de milho cozido", amount: "200g", substitutes: "Banana da terra cozida (180g), Pão de forma (3 fatias, 75.4g), Pão francês (80g), Mandioca cozida (180g)" },
+                        { icon: '🥩', item: "Peito de frango ou carne magra", amount: "1.3 Filés médios (130g)", substitutes: null }
+                    ]}
+                ]
+            },
+            progress: { 
+                dates: ['10/01/2024', '31/07/2024', '05/05/2025', '15/07/2025'], 
+                weight: [98.7, 92.8, 96.8, 96.2], 
+                fatPercentage: [24.9, 16.4, 19.5, 15.1], 
+                fatMass: [24.5, 15.3, 18.9, 14.5], 
+                leanMass: [74.2, 77.5, 77.9, 81.7], 
+                waist: [93, 87, 93, 93], 
+                abdomen: [100, 93, 96, 99], 
+                skinfolds: { 
+                    labels: ['Tricipital', 'Abdominal', 'Subescapular', 'Axilar Média', 'Torácica', 'Suprailíaca'], 
+                    data: [ 
+                        [45, 40, 35, 25, 20, 20], 
+                        [11.2, 30, 23.6, 12.4, 9.5, 14.7], 
+                        [12, 32, 30, 16, 15, 20],
+                        [8.8, 20, 17.7, 3.8, 11.9, 23.5]
+                    ] 
+                } 
+            },
+            calendarActivities: {
+                0: { activity: "MUSCULAÇÃO: TREINO INFERIORES A", msg: "Um novo ciclo de força começa hoje! Dê o seu melhor.", verse: "Salmos 28:7", workoutKey: "domingo_inferiores_a" },
+                1: { activity: "MUSCULAÇÃO E CORRIDA", msg: "Construa sua força de cima para baixo. Foco e execução!", verse: "Filipenses 4:13", workoutKey: "segunda_costas_antebraco_biceps", runKey: "segunda_eloisa" }, 
+                2: { activity: "DESCANSO ATIVO", msg: "Dia de descanso ativo. Uma caminhada leve pode ajudar na recuperação.", verse: "Mateus 11:28" },
+                3: { activity: "MUSCULAÇÃO E CORRIDA", msg: "Postura e força para seus ombros! Mantenha a forma.", verse: "Provérbios 21:5", workoutKey: "quarta_inferiores_b", runKey: "quarta_eloisa" }, 
+                4: { activity: "DESCANSO ATIVO", msg: "Descanse bem, reflita sobre seu progresso e agradeça.", verse: "1 Pedro 5:7" },
+                5: { activity: "MUSCULAÇÃO: PEITO + TRÍCEPS", msg: "Core forte, costas poderosas. O centro do seu poder!", verse: "Provérbios 14:23", workoutKey: "sexta_peito_triceps" },
+                6: { activity: "CORRIDA E MUSCULAÇÃO", msg: "Resistência e estratégia na sua corrida mais longa! Conquiste!", verse: "Hebreus 12:1", workoutKey: "sabado_ombros_trapezio", runKey: "sabado_eloisa" }
+            },
+            weeklySchedule: [ { day: "Domingo", schedule: [{time: "06:00-07:10", task: "🏋️‍♂️ MUSCULAÇÃO: TREINO INFERIORES A"}, {time: "09:00-11:20", task: "🙏 ESCOLA BÍBLICA DOMINICAL"}, {time: "18:30-20:00", task: "🙏 CULTO NA IGREJA"}] }, { day: "Segunda-feira", schedule: [{time: "05:20-06:30", task: "🦾 MUSCULAÇÃO: COSTAS + ANTEBRAÇO + BÍCEPS"}, {time: "18:10-19:00", task: "🏃‍♂️ CORRida LEVE (Ampaulo) / 🏃‍♀️ TREINO DE CORRIDA (Eloísa)"}, {time: "21:00-22:00", "task": "📚 ESTUDO"}] }, { day: "Terça-feira", schedule: [{time: "20:00-20:45", task: "🙏 CULTO EM FAMÍLIA EM NOSSA CASA"}] }, { day: "Quarta-feira", schedule: [{time: "05:20-06:30", task: "💪 MUSCULAÇÃO: TREINO INFERIORES B"}, {time: "18:10-19:00", task: "🏃‍♂️ CORRIDA INTERVALADA (Ampaulo) / 🏃‍♀️ TREINO DE CORRIDA (Eloísa)"}, {time: "21:00-22:00", "task": "📚 ESTUDO"}] }, { day: "Quinta-feira", schedule: [{time: "19:30-21:00", task: "🙏 CULTO PG ATALAIA"}] }, { day: "Sexta-feira", schedule: [{time: "05:20-06:30", task: "🏋️‍♂️ MUSCULAÇÃO: PEITO + TRÍCEPS"}, {time: "21:00-22:00", "task": "📚 ESTUDO"}] }, { day: "Sábado", schedule: [{time: "05:20-06:30", task: "🏃‍♂️ CORRIDA LONGA (Ampaulo) / 🏃‍♀️ TREINO DE CORRIDA (Eloísa)"}, {time: "07:10-08:10", task: "💪 MUSCULAÇÃO: OMBROS + TRAPÉZIO"}, {time: "14:20-17:00", task: "👨‍👩‍👦 AULAS DOS FILHOS"}] } ],
+            finances: { billPayments: [ { name: "Vencimento Fatura Energia (Coelba)", day: 3 }, { name: "Vencimento Fatura Cartão Inter", day: 7 }, { name: "Vencimento Consórcio Biz (Honda)", day: 10 }, { name: "Vencimento Consórcio Biz (Honda)", day: 10 }, { name: "Vencimento Fatura Cartão C6Bank", day: 20 }, { name: "Vencimento Fatura Internet (Netcenter)", day: 20 }, { name: "Vencimento Fatura PicPay", day: 25 }, { name: "Vencimento Fatura Água (Embasa)", day: 30 } ].sort((a, b) => a.day - b.day), creditCardInfo: [ { name: "Cartão Inter", closingDay: 30, maturityDay: 7 }, { name: "Cartão C6Bank", closingDay: 10, maturityDay: 20 }, { name: "Cartão PicPay", closingDay: 15, maturityDay: 25 } ].sort((a, b) => a.maturityDay - b.maturityDay), salaryDetails: { salaryDay: 5, advanceDay: 20 } }
+        };
+
+        // --- Firebase Variables (for Canvas use, injected in real environment) ---
+        let app, db, auth, userId;
+        const firebaseConfig = {
+            apiKey: "AIzaSyDfw0hfPcfsZeIqQprzzRjUTpKvZ-dc_io", // Use your real key here in the local file
+            authDomain: "painel-ampaulo.firebaseapp.com",
+            projectId: "painel-ampaulo",
+            storageBucket: "painel-ampaulo.firebasestorage.app",
+            messagingSenderId: "1039977013900",
+            appId: "1:1039977013900:web:a9e8387dc74ff7662b91a9",
+            measurementId: "G-3QSW926GR7"
+        };
+        
+        // User profile and progress data (loaded/saved in Firestore)
+        window.userProfile = { name: "Convidado", gender: "nao-informar", dob: "1990-01-01", height: 0, currentWeight: 0, idealWeight: 0, email: "", phone: "" };
+
+        // --- Firebase Functions ---
+        async function initializeFirebaseAndAuth() {
+            try {
+                // Find the appId injected by the environment or use a default
+                const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                
+                // Initialize Firebase with the provided config
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Try to authenticate with a custom token (if available) or anonymously
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInAnonymously(auth); // Using signInAnonymously as fallback
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                // Observe auth state to load data
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        // Load profile and progress data from Firestore
+                        await loadUserProfileFromFirestore(currentAppId, userId);
+                        await loadProgressDataFromFirestore(currentAppId, userId);
+                    }
+                    // Dispatch event when authentication and initial loading are ready
+                    document.dispatchEvent(new Event('firebaseAuthReady'));
+                });
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+                document.dispatchEvent(new Event('firebaseAuthReady'));
+            }
+        }
+
+        async function saveUserProfileToFirestore(currentAppId, uid) {
+            if (!uid || !db) return;
+            const userDocRef = doc(db, `artifacts/${currentAppId}/users/${uid}/profile`, 'user-data');
+            await setDoc(userDocRef, window.userProfile, { merge: true });
+            console.log("User profile saved to Firestore.");
+        };
+
+        function loadUserProfileFromFirestore(currentAppId, uid) {
+            return new Promise(resolve => {
+                if (!uid || !db) { resolve(); return; }
+                const userDocRef = doc(db, `artifacts/${currentAppId}/users/${uid}/profile`, 'user-data');
+                onSnapshot(userDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        Object.assign(window.userProfile, docSnap.data());
+                        console.log("User profile loaded from Firestore.");
+                    } else {
+                        console.log("No user profile found in Firestore.");
+                    }
+                    resolve();
+                }, (error) => {
+                    console.error("Error loading profile from Firestore:", error);
+                    resolve();
+                });
+            });
+        };
+
+        async function saveProgressDataToFirestore(currentAppId, uid) {
+            if (!uid || !db) return;
+            const progressDocRef = doc(db, `artifacts/${currentAppId}/users/${uid}/progress`, 'progress-data');
+            // Store the progress object as a JSON string in Firestore
+            await setDoc(progressDocRef, { data: JSON.stringify(projectData.progress) }, { merge: true });
+            console.log("Progress data saved to Firestore.");
+        };
+
+        function loadProgressDataFromFirestore(currentAppId, uid) {
+            return new Promise(resolve => {
+                if (!uid || !db) { resolve(); return; }
+                const progressDocRef = doc(db, `artifacts/${currentAppId}/users/${uid}/progress`, 'progress-data');
+                onSnapshot(progressDocRef, (docSnap) => {
+                    if (docSnap.exists() && docSnap.data().data) {
+                        // Parse the JSON string back to an object
+                        Object.assign(projectData.progress, JSON.parse(docSnap.data().data));
+                        console.log("Progress data loaded from Firestore.");
+                    } else {
+                        console.log("No progress data found in Firestore.");
+                    }
+                    resolve();
+                });
+            });
+        };
+
+
+        // --- APPLICATION LOGIC ---
+        const contentDiv = document.getElementById('app').querySelector('main');
+        const navButtonsContainer = document.getElementById('main-nav');
+
+        // Define Ampaulo's running schedule for August and subsequent months
+        projectData.monthlyRunSchedules = {};
+
+        const runCycle = [
+            'ampaulo_intervalado',    // Treino 1
+            'ampaulo_ritmo',          // Treino 2
+            'ampaulo_progressivo',    // Treino 4
+            'ampaulo_fartlek'         // Treino 5
+        ];
+        let runCycleIndex = 0; // Index for runCycle for Mondays and Wednesdays
+
+        const startDate = new Date(2025, 7, 1); // August 1, 2025 (Month is 0-indexed)
+        const endDate = new Date(2025, 11, 31); // December 31, 2025
+
+        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+            const year = d.getFullYear();
+            const month = d.getMonth();
+            const dayOfMonth = d.getDate();
+            const dayOfWeek = d.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+            const monthKey = `${year}-${month}`;
+
+            if (!projectData.monthlyRunSchedules[monthKey]) {
+                projectData.monthlyRunSchedules[monthKey] = {};
+            }
+
+            if (dayOfWeek === 6) { // Saturday
+                projectData.monthlyRunSchedules[monthKey][dayOfMonth] = 'ampaulo_longao'; // Treino 3
+            } else if (dayOfWeek === 1 || dayOfWeek === 3) { // Monday or Wednesday
+                if (runCycleIndex >= runCycle.length) {
+                    runCycleIndex = 0; // Reset cycle
+                }
+                projectData.monthlyRunSchedules[monthKey][dayOfMonth] = runCycle[runCycleIndex];
+                runCycleIndex++;
+            }
+        }
+
+
+        // New function to get the target distance for the Long Run for a specific month and year
+        function getTargetLongaoDistanceForMonth(month, year) {
+            const goal = projectData.progDistancia.goals.find(g => g.month === month && g.year === year);
+            return goal ? goal.distance : projectData.virtualCoach.trainingTypes.longao.baseDistance;
+        }
+
+        // This function will now be responsible for generating and storing ALL scaled run plans
+        function generateAndStoreScaledRunPlans() {
+            const today = new Date();
+            const currentYear = today.getFullYear();
+            const currentMonth = today.getMonth(); // 0-indexed
+
+            const targetDistanceForCurrentMonth = getTargetLongaoDistanceForMonth(currentMonth, currentYear);
+            const initialLongaoBaseDistance = projectData.virtualCoach.trainingTypes.longao.baseDistance;
+            const scalingFactor = targetDistanceForCurrentMonth / initialLongaoBaseDistance;
+
+            // Helper function to create the scaled run training object
+            const createScaledRunObject = (originalType, keyPrefix, targetDistance, isLongao = false) => {
+                let scaledStructure;
+                let title;
+                let objective;
+
+                if (isLongao) {
+                    scaledStructure = generateLongaoStructure(targetDistance);
+                    title = `🏃‍♂️ Corrida Longa (${getMonthName(today)} - Meta ${targetDistance}km)`;
+                    objective = originalType.description;
+                } else {
+                    scaledStructure = scaleTrainingStructure(originalType, scalingFactor).structure;
+                    title = `🏃‍♂️ ${originalType.name.split(': ')[1]} (Escalada)`;
+                    objective = originalType.description;
+                }
+                
+                const totalDistance = scaledStructure.reduce((sum, phase) => {
+                    const distValue = parseFloat(phase.distance);
+                    return sum + (isNaN(distValue) ? 0 : distValue);
+                }, 0);
+                const totalTimeSeconds = scaledStructure.reduce((sum, phase) => {
+                    const timeStr = calculateEstimatedTime(phase.distance, phase.zone);
+                    const [min, sec] = timeStr.split(':').map(Number);
+                    return sum + (min * 60) + sec;
+                }, 0);
+                const totalMinutes = Math.floor(totalTimeSeconds / 60);
+                const totalSecondsRemainder = Math.round(totalTimeSeconds % 60);
+
+                return {
+                    key: `${keyPrefix}_${originalType.key || originalType.name.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+                    title: title,
+                    schedule: "Horário Adaptado", // Can be adapted according to training type
+                    objective: objective,
+                    estimated_distance: `~${totalDistance.toFixed(1)} km`,
+                    total: { duration: `${totalMinutes} min ${totalSecondsRemainder.toString().padStart(2, '0')} sec`, distance: `${totalDistance.toFixed(1)} km` },
+                    stages: scaledStructure.map(phase => ({
+                        km: (typeof phase.distance === 'number')
+                            ? (phase.distance === Math.floor(phase.distance) ? String(phase.distance) : phase.distance.toFixed(1))
+                            : String(phase.phase), // Fallback for strings like "Aquecimento", "Desaquecimento"
+                        name: phase.description,
+                        pace: `${projectData.runs.paceDefinitionsAmpaulo.find(def => def.name.startsWith(phase.zone)).min_km}-${projectData.runs.paceDefinitionsAmpaulo.find(def => def.name.startsWith(phase.zone)).max_km}`,
+                        zone: phase.zone,
+                        estimated_time: calculateEstimatedTime(phase.distance, phase.zone)
+                    }))
+                };
+            };
+
+            // Generate and store all 5 Ampaulo training plans
+            projectData.runs.ampaulo_intervalado = createScaledRunObject(projectData.virtualCoach.trainingTypes.intervalado, 'ampaulo');
+            projectData.runs.ampaulo_ritmo = createScaledRunObject(projectData.virtualCoach.trainingTypes.ritmo, 'ampaulo');
+            projectData.runs.ampaulo_longao = createScaledRunObject(projectData.virtualCoach.trainingTypes.longao, 'ampaulo', targetDistanceForCurrentMonth, true); // Long Run is special
+            projectData.runs.ampaulo_progressivo = createScaledRunObject(projectData.virtualCoach.trainingTypes.progressivo, 'ampaulo');
+            projectData.runs.ampaulo_fartlek = createScaledRunObject(projectData.virtualCoach.trainingTypes.fartlek, 'ampaulo');
+        }
+
+        // Function to scale training structure for a given scaling factor
+        function scaleTrainingStructure(originalTrainingType, scalingFactor) {
+            const scaledTraining = JSON.parse(JSON.stringify(originalTrainingType)); 
+
+            if (scaledTraining.structure) {
+                scaledTraining.structure.forEach(phase => {
+                    if (typeof phase.distance === 'number') {
+                        phase.distance = parseFloat((phase.distance * scalingFactor).toFixed(1)); 
+                    }
+                });
+            }
+            if (scaledTraining.estimated_distance && typeof scaledTraining.baseDistance === 'number') {
+                const totalBaseDistance = scaledTraining.baseDistance;
+                const newTotalDistance = parseFloat((totalBaseDistance * scalingFactor).toFixed(1));
+                scaledTraining.estimated_distance = `~${newTotalDistance} km`;
+                if (scaledTraining.total) {
+                    scaledTraining.total.distance = `${newTotalDistance} km`;
+                }
+            }
+
+            return scaledTraining;
+        }
+
+
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons(); 
+
+            const views = document.querySelectorAll('.view');
+            const navButtons = document.querySelectorAll('.nav-button');
+
+            navButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const targetId = button.dataset.target;
+                    navButtons.forEach(btn => btn.classList.remove('active'));
+                    button.classList.add('active');
+                    views.forEach(view => view.classList.toggle('active', view.id === targetId));
+
+                    switch (targetId) {
+                        case 'home':
+                        case 'amanha':
+                            initDynamicDayViews(); 
+                            break;
+                        case 'treino':
+                            initWorkoutsView();
+                            break;
+                        case 'corrida':
+                            initCorridaView();
+                            break;
+                        case 'prog-distancia':
+                            initProgDistanciaView();
+                            break;
+                        case 'nutricao':
+                            initNutritionView();
+                            break;
+                        case 'progresso':
+                            initProgressView();
+                            break;
+                        case 'calendario':
+                            initCalendarView();
+                            break;
+                        case 'financas':
+                            initFinancesView();
+                            break;
+                    }
+                });
+            });
+
+            document.addEventListener('firebaseAuthReady', () => {
+                generateAndStoreScaledRunPlans(); // GENERATE and STORE scaled run plans for the current month
+                generateWeeklyTrainingPlan(); // RENDER the weekly plan in the "Progressão" tab (which uses already scaled data)
+
+                document.getElementById('home').classList.add('active');
+                navButtonsContainer.querySelector('[data-target="home"]').classList.add('active');
+                initDynamicDayViews(); 
+            });
+
+            const modal = document.getElementById('calendar-modal');
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal || e.target.closest('#modal-close')) {
+                    modal.classList.add('hidden');
+                }
+            });
+
+            initializeFirebaseAndAuth();
+        });
+
+
+        // --- Functions to Populate Views ---
+
+        function initDynamicDayViews() {
+            const today = new Date();
+            const tomorrow = new Date();
+            tomorrow.setDate(today.getDate() + 1);
+            populateDayView('home', today);
+            populateDayView('amanha', tomorrow);
+        }
+
+        function populateDayView(viewId, date) {
+            const container = document.getElementById(viewId);
+            const dayOfMonth = date.getDate();
+            const weekdayName = getDayName(date);
+            const monthName = getMonthName(date);
+            const weekdayIndex = date.getDay(); 
+            const dayData = projectData.calendarActivities[weekdayIndex] || { msg: "Dia de descanso.", verse: "" };
+            
+            let scheduleHtml = '';
+            const scheduleData = projectData.weeklySchedule.find(d => d.day === weekdayName + (weekdayIndex > 0 && weekdayIndex < 6 ? '-feira' : ''));
+            if (scheduleData?.schedule.length > 0) {
+                scheduleHtml = scheduleData.schedule.map(item => `<li class="flex items-center gap-4"><span class="bg-teal-100 text-teal-700 text-xs font-semibold px-2.5 py-0.5 rounded-full">${item.time}</span><span>${item.task}</span></li>`).join('');
+            } else {
+                scheduleHtml = '<li>Dia de descanso ou atividades flexíveis. Aproveite!</li>';
+            }
+
+            let workoutHtml = '';
+            if (dayData.workoutKey) {
+                const workout = projectData.workouts[dayData.workoutKey];
+                workoutHtml = `<div class="bg-white p-6 rounded-lg shadow-md mt-6">
+                    <h3 class="text-xl font-semibold mb-4 border-b pb-2">🏋️‍♂️ Treino de Musculação</h3>
+                    ${generateWorkoutHTML(workout, true)} 
+                </div>`;
+            }
+
+            let runHtml = '';
+            const dateKey = `${date.getFullYear()}-${date.getMonth()}`;
+            const specificRunKey = projectData.monthlyRunSchedules[dateKey] ? projectData.monthlyRunSchedules[dateKey][dayOfMonth] : null;
+
+            if (specificRunKey && projectData.runs[specificRunKey]) {
+                const run = projectData.runs[specificRunKey];
+                runHtml = `<div class="bg-white p-6 rounded-lg shadow-md mt-6">
+                    <h3 class="text-xl font-semibold mb-4 border-b pb-2">🏃‍♂️ Treino de Corrida</h3>
+                    ${generateRunHTML(run, true)}
+                </div>`;
+            } else if (dayData.runKey && projectData.runs[dayData.runKey]) { // Fallback for Eloisa or if no specific Ampaulo run is scheduled
+                const run = projectData.runs[dayData.runKey];
+                const isAmpauloRun = false; // This is now explicitly Eloisa or general
+                runHtml = `<div class="bg-white p-6 rounded-lg shadow-md mt-6">
+                    <h3 class="text-xl font-semibold mb-4 border-b pb-2">🏃‍♂️ Treino de Corrida</h3>
+                    ${generateRunHTML(run, isAmpauloRun)}
+                </div>`;
+            }
+            
+            let financeHtml = '';
+            const obligations = projectData.finances.billPayments.filter(b => b.day == dayOfMonth);
+            if(obligations.length > 0) {
+                financeHtml = `<div class="bg-white p-6 rounded-lg shadow-md mt-6">
+                    <h3 class="text-xl font-semibold mb-4 border-b pb-2">💰 Finanças</h3>
+                    <ul class="space-y-2 text-slate-600">${obligations.map(o => `<li class="flex items-center gap-2"><i data-lucide="alert-circle" class="text-red-500"></i>Vencimento: ${o.name}</li>`).join('')}</ul>
+                </div>`
+            }
+
+            container.innerHTML = `
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-2xl font-bold text-slate-800">${weekdayName}, ${dayOfMonth} de ${monthName}</h2>
+                    <p class="text-slate-500 italic mt-1">"${dayData.msg}" - ${dayData.verse}</p>
+                </div>
+                <div class="mt-6 space-y-6">
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="text-xl font-semibold mb-4 border-b pb-2">🗓️ Sua Rotina</h3>
+                        <ul class="space-y-3 text-slate-600">${scheduleHtml}</ul>
+                    </div>
+                    ${workoutHtml}
+                    ${runHtml}
+                    ${financeHtml}
+                </div>`;
+            lucide.createIcons(); 
+        }
+
+        function generateWorkoutHTML(workout, simpleCard = false) {
+            if (!workout) return '';
+            if (simpleCard) {
+                return `<div>
+                    <h4 class="text-lg font-bold text-slate-900">${workout.title}</h4>
+                    <p class="text-sm text-slate-500 mt-1">${workout.objective}</p>
+                    <div class="mt-4">
+                        ${workout.groups.map(group => `
+                            <div class="mb-2">
+                                <h5 class="font-semibold text-md text-teal-700">${group.name} (${group.series} séries)</h5>
+                                <ul class="mt-1 pl-4 space-y-1 list-disc text-sm text-slate-600">
+                                    ${group.exercises.map(ex => `<li><strong>${ex.name}:</strong> ${ex.sets}</li>`).join('')}
+                                </ul>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+            }
+            return `
+                <button class="workout-accordion-button w-full text-left p-4 flex justify-between items-center">
+                    <div>
+                        <h3 class="text-lg font-bold text-slate-900">${workout.title}</h3>
+                        <p class="text-sm text-slate-500 mt-1">${workout.objective}</p>
+                    </div>
+                    <i data-lucide="chevron-down" class="transition-transform"></i>
+                </button>
+                <div class="workout-accordion-content px-4 pb-4">
+                    <div class="border-t pt-4">
+                        ${workout.groups.map(group => `
+                            <div class="mb-4">
+                                <h4 class="font-semibold text-md text-teal-700">${group.name} (${group.series} séries)</h4>
+                                <ul class="mt-2 pl-5 space-y-2 list-disc text-sm text-slate-600">
+                                    ${group.exercises.map(ex => `<li><strong>${ex.name}:</strong> ${ex.sets}</li>`).join('')}
+                                </ul>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+        }
+
+        // Generates HTML for a running training
+        function generateRunHTML(run, isAmpaulo) {
+            if (!run) return '';
+            let stagesHtml = '';
+            if (isAmpaulo) {
+                stagesHtml = `
+                    <thead><tr><th>Km</th><th>Etapa</th><th>Pace</th><th>Zona</th><th>Tempo</th></tr></thead>
+                    <tbody>${run.stages.map(s => {
+                        let kmDisplay = '';
+                        if (s && s.km !== undefined && s.km !== null) {
+                            if (typeof s.km === 'number') {
+                                kmDisplay = s.km.toFixed(1);
+                            } else if (typeof s.km === 'string' && !isNaN(parseFloat(s.km))) {
+                                kmDisplay = parseFloat(s.km).toFixed(1);
+                            } else {
+                                kmDisplay = '-';
+                            }
+                        } else {
+                            kmDisplay = '-';
+                        }
+                        return `<tr><td class="p-2">${kmDisplay}</td><td class="p-2">${s.name}</td><td class="p-2">${s.pace}</td><td class="p-2">${s.zone}</td><td class="p-2">${s.estimated_time}</td></tr>`;
+                    }).join('')}</tbody>`;
+            } else {
+                stagesHtml = `
+                    <thead><tr><th>Etapa</th><th>Duração</th><th>Ritmo</th></tr></thead>
+                    <tbody>${run.stages.map(s => `<tr><td class="p-2">${s.name}</td><td class="p-2">${s.duration}</td><td class="p-2">${s.pace}</td></tr>`).join('')}</tbody>`;
+            }
+
+            return `<h4 class="text-lg font-bold text-slate-900">${run.title}</h4>
+                    <div class="overflow-x-auto mt-4">
+                        <table class="run-table w-full text-sm">
+                            ${stagesHtml}
+                        </table>
+                    </div>
+                    <div class="mt-4 pt-4 border-t flex justify-between font-semibold">
+                        <span>Total:</span>
+                        <span>${run.total.duration} / ~${run.total.distance}</span>
+                    </div>`;
+        }
+        
+        function getCurrentLongaoDistance() {
+            const today = new Date();
+            const currentMonth = today.getMonth(); 
+            const currentYear = today.getFullYear();
+            return getTargetLongaoDistanceForMonth(currentMonth, currentYear);
+        }
+        
+        function updateCurrentWeek() {
+            projectData.virtualCoach.currentWeek = projectData.virtualCoach.currentWeek === 1 ? 2 : 1;
+            document.getElementById('week-selector').value = projectData.virtualCoach.currentWeek;
+            updateWeekDisplay();
+            generateAndStoreScaledRunPlans(); 
+            generateWeeklyTrainingPlan(); 
+        }
+        
+        function updateWeekDisplay() {
+            // "Current Status" and "Settings" sections have been removed, so these elements no longer exist here.
+            // Keeping the function for compatibility in case "currentWeek" logic is used elsewhere.
+            // console.log("currentWeek:", projectData.virtualCoach.currentWeek);
+            // console.log("nextLongaoDistance:", getCurrentLongaoDistance() + 'km');
+        }
+        
+        function paceToSeconds(paceString) {
+            const [minutes, seconds] = paceString.split(':').map(Number);
+            return minutes * 60 + seconds;
+        }
+        
+        function secondsToPace(totalSeconds) {
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = Math.round(totalSeconds % 60);
+            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+        
+        function calculateEstimatedTime(distance, zoneName) {
+            const paceDef = projectData.runs.paceDefinitionsAmpaulo.find(def => def.name.startsWith(zoneName));
+            if (!paceDef) return "N/A";
+            
+            const avgPaceSeconds = (paceToSeconds(paceDef.min_km) + paceToSeconds(paceDef.max_km)) / 2;
+            
+            const totalTimeSeconds = distance * avgPaceSeconds;
+            const minutes = Math.floor(totalTimeSeconds / 60);
+            const seconds = Math.round(totalTimeSeconds % 60);
+            
+            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+        
+        function generateLongaoStructure(distance) {
+            const structure = [
+                { phase: "Aquecimento", distance: 1.0, zone: "Z1", description: "Preparação corporal" }
+            ];
+
+            const mainKm = distance - 2; 
+            if (mainKm > 0) {
+                for(let i=1; i <= mainKm; i++) {
+                    const zone = i % 2 !== 0 ? "Z2" : "Z3";
+                    structure.push({
+                        phase: `Ritmo ${i}`,
+                        distance: 1.0,
+                        zone: zone,
+                        description: zone === "Z2" ? "Ritmo confortável" : "Ritmo moderado"
+                    });
+                }
+            }
+            
+            structure.push({ phase: "Desaquecimento", distance: 1.0, zone: "Z1", description: "Volta à calma" });
+            return structure;
+        }
+        
+        function generateWeeklyTrainingPlan() {
+            const container = document.getElementById('weekly-training-plan');
+            if (!container) return; 
+
+            const today = new Date();
+            const currentDay = today.getDate();
+            const currentMonth = today.getMonth();
+            const currentYear = today.getFullYear();
+
+            let planHtml = '';
+            const daysToShow = 7; 
+
+            for (let i = 0; i < daysToShow; i++) {
+                const date = new Date(today);
+                date.setDate(currentDay + i); 
+
+                const dayName = getDayName(date);
+                const monthName = getMonthName(date);
+                const dayOfMonth = date.getDate();
+                const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
+
+                let trainingDescription = 'Dia de descanso ou atividade flexível.';
+                let trainingDetailsHtml = '';
+                let trainingType = null;
+                let isAmpauloRun = false;
+
+                // Check for specific Ampaulo run in monthly schedule
+                if (projectData.monthlyRunSchedules[monthKey] && projectData.monthlyRunSchedules[monthKey][dayOfMonth]) {
+                    trainingType = projectData.monthlyRunSchedules[monthKey][dayOfMonth];
+                    isAmpauloRun = true;
+                } else {
+                    // Fallback to general calendar activities for Eloisa or general non-ampaulo days
+                    const weekdayIndex = date.getDay();
+                    if (projectData.calendarActivities[weekdayIndex] && projectData.calendarActivities[weekdayIndex].runKey) {
+                        trainingType = projectData.calendarActivities[weekdayIndex].runKey;
+                        isAmpauloRun = false; // Eloisa run
+                    }
+                }
+
+                let title = `${dayName}, ${dayOfMonth} de ${monthName}`;
+
+                if (trainingType && projectData.runs[trainingType]) {
+                    const run = projectData.runs[trainingType];
+                    const totalDistance = parseFloat(run.total.distance.replace(' km', ''));
+                    const totalDuration = run.total.duration;
+
+                    title = `🏃‍♂️ ${run.title.replace('🏃‍♂️ ', '').split('(')[0].trim()} - ${title}`;
+                    trainingDescription = run.objective || run.title; // Use objective if available, else title
+
+                    if (isAmpauloRun) {
+                        trainingDetailsHtml = `
+                            <div class="bg-slate-50 p-4 rounded-lg mt-4">
+                                <h4 class="font-bold mb-3">📋 Plano Detalhado:</h4>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-xs border border-slate-300">
+                                        <thead class="bg-slate-800 text-white">
+                                            <tr>
+                                                <th class="border border-slate-300 px-2 py-1">Km</th><th class="border border-slate-300 px-2 py-1">Etapa</th><th class="border border-slate-300 px-2 py-1">Pace</th><th class="border border-slate-300 px-2 py-1">Zona</th><th class="border border-slate-300 px-2 py-1">Tempo Est.</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${run.stages.map((stage, index) => {
+                                                let paceRange = "N/A";
+                                                let zoneDisplay = "";
+                                                const paceDef = projectData.runs.paceDefinitionsAmpaulo.find(def => def.name.startsWith(stage.zone));
+                                                if (paceDef) {
+                                                    paceRange = `${paceDef.min_km}-${paceDef.max_km}`;
+                                                    zoneDisplay = `<span class="bg-slate-200 px-1 rounded text-xs">${stage.zone}</span>`;
+                                                }
+
+                                                let kmDisplay = (typeof stage.km === 'number') ? stage.km.toFixed(1) : String(stage.km);
+
+                                                return `<tr class="border-b border-slate-200 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50'}">
+                                                    <td class="border border-slate-300 px-2 py-1 font-medium">${kmDisplay}</td>
+                                                    <td class="border border-slate-300 px-2 py-1">${stage.name}</td>
+                                                    <td class="border border-slate-300 px-2 py-1">${paceRange}</td>
+                                                    <td class="border border-slate-300 px-2 py-1">${zoneDisplay}</td>
+                                                    <td class="border border-slate-300 px-2 py-1">${stage.estimated_time}</td>
+                                                </tr>`;
+                                            }).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="mt-4 p-3 bg-slate-100 rounded border">
+                                    <p class="font-bold text-slate-800">📊 Resumo Total:</p>
+                                    <p class="text-slate-700">Distância: <strong>${totalDistance.toFixed(1)}km</strong> | Tempo Estimado: <strong>${totalDuration}</strong></p>
+                                </div>
+                            </div>`;
+                    } else { // Eloisa run
+                         trainingDetailsHtml = `
+                            <div class="bg-slate-50 p-4 rounded-lg mt-4">
+                                <h4 class="font-bold mb-3">📋 Plano Detalhado:</h4>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-xs border border-slate-300">
+                                        <thead class="bg-slate-800 text-white">
+                                            <tr>
+                                                <th class="border border-slate-300 px-2 py-1">Etapa</th><th class="border border-slate-300 px-2 py-1">Duração</th><th class="border border-slate-300 px-2 py-1">Ritmo</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${run.stages.map((stage, index) => `<tr class="border-b border-slate-200 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50'}">
+                                                <td class="border border-slate-300 px-2 py-1">${stage.name}</td>
+                                                <td class="border border-slate-300 px-2 py-1">${stage.duration}</td>
+                                                <td class="border border-slate-300 px-2 py-1">${stage.pace}</td>
+                                            </tr>`).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="mt-4 p-3 bg-slate-100 rounded border">
+                                    <p class="font-bold text-slate-800">📊 Resumo Total:</p>
+                                    <p class="text-slate-700">Duração: <strong>${run.total.duration}</strong></p>
+                                </div>
+                            </div>`;
+                    }
+                }
+
+                planHtml += `
+                    <div class="bg-white p-6 rounded-lg shadow-md border-l-4 border-teal-500">
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4">
+                            <div>
+                                <h3 class="text-xl font-bold text-slate-900">${title}</h3>
+                                <p class="text-slate-600">${trainingDescription}</p>
+                            </div>
+                            ${trainingType ? `<div class="text-right mt-2 md:mt-0">
+                                <p class="text-lg font-bold text-slate-800">${isAmpauloRun ? totalDistance.toFixed(1) + 'km' : totalDuration}</p>
+                                <p class="text-sm text-slate-600">Estimado</p>
+                            </div>` : ''}
+                        </div>
+                        ${trainingDetailsHtml}
+                    </div>`;
+            }
+            container.innerHTML = planHtml;
+            const lastGeneratedEl = document.getElementById('last-generated');
+            if(lastGeneratedEl) lastGeneratedEl.textContent = today.toLocaleDateString('pt-BR');
+            lucide.createIcons();
+        }
+
+        // --- View Initialization Functions ---
+        function initWorkoutsView() {
+            const container = document.getElementById('treino');
+            const workoutOrder = ['segunda_costas_antebraco_biceps', 'quarta_inferiores_b', 'sexta_peito_triceps', 'sabado_ombros_trapezio', 'domingo_inferiores_a'];
+            let html = `<h2 class="text-2xl font-bold text-slate-800 mb-4">Plano de Treino</h2><div class="space-y-4">`;
+            
+            workoutOrder.forEach(key => {
+                const workout = projectData.workouts[key];
+                html += `<div class="bg-white rounded-lg shadow-md">${generateWorkoutHTML(workout)}</div>`; 
+            });
+            html += '</div>';
+            container.innerHTML = html;
+            lucide.createIcons();
+
+            container.querySelectorAll('.workout-accordion-button').forEach(button => {
+                button.addEventListener('click', () => {
+                    const content = button.nextElementSibling;
+                    const icon = button.querySelector('i');
+                    button.classList.toggle('open');
+                    icon.classList.toggle('rotate-180');
+                    if (button.classList.contains('open')) {
+                        content.style.maxHeight = content.scrollHeight + "px";
+                    } else {
+                        content.style.maxHeight = null;
+                    }
+                });
+            });
+        }
+        
+        function initCorridaView() {
+            const container = document.getElementById('corrida');
+            container.innerHTML = `<h2 class="text-2xl font-bold text-slate-800 mb-4">Plano de Corrida</h2>
+                <div class="bg-white rounded-lg shadow-md p-2 mb-6">
+                    <div class="flex justify-center items-center gap-2" id="corrida-sub-nav">
+                        <button data-target="corrida-ampaulo" class="sub-nav-button active flex-1 text-center font-semibold py-2 px-4 rounded-lg">Treino Ampaulo</button>
+                        <button data-target="corrida-eloisa" class="sub-nav-button flex-1 text-center font-semibold py-2 px-4 rounded-lg">Treino Eloísa</button>
+                    </div>
+                </div>
+                <div id="corrida-ampaulo" class="run-content-section active"></div>
+                <div id="corrida-eloisa" class="run-content-section"></div>`;
+
+            const ampauloContainer = document.getElementById('corrida-ampaulo');
+            const eloisaContainer = document.getElementById('corrida-eloisa');
+            
+            // Pass the new keys of the scaled Ampaulo training
+            ampauloContainer.innerHTML = generateRunSectionHTML(
+                ['ampaulo_intervalado', 'ampaulo_ritmo', 'ampaulo_longao', 'ampaulo_progressivo', 'ampaulo_fartlek'], 
+                projectData.runs.paceDefinitionsAmpaulo, true
+            );
+            eloisaContainer.innerHTML = generateRunSectionHTML(['segunda_eloisa', 'quarta_eloisa', 'sabado_eloisa'], projectData.runs.paceDefinitionsEloisa, false);
+            lucide.createIcons();
+
+            container.querySelectorAll('.sub-nav-button').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    container.querySelectorAll('.sub-nav-button').forEach(btn => btn.classList.remove('active'));
+                    container.querySelectorAll('.run-content-section').forEach(section => section.classList.remove('active'));
+                    
+                    e.currentTarget.classList.add('active');
+                    const targetElement = container.querySelector(`#${e.currentTarget.dataset.target}`);
+                    if (targetElement) {
+                        targetElement.classList.add('active');
+                    }
+                });
+            });
+        }
+
+        function generateRunSectionHTML(runKeys, paceDefs, isAmpaulo) {
+            let html = `
+                <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                    <h3 class="text-xl font-bold text-slate-900 mb-4">Definições de Ritmo (Pace Zones)</h3>
+                    <div class="overflow-x-auto"><table class="run-table w-full text-sm text-left border-collapse"><thead><tr>
+                        <th class="px-4 py-2">Zona</th><th class="px-4 py-2">Min/Km</th><th class="px-4 py-2">Max/Km</th><th class="px-4 py-2">Descrição</th>
+                    </tr></thead><tbody>
+                    ${paceDefs.map(zone => `<tr><td class="px-4 py-2"><strong>${zone.name}</strong></td><td>${zone.min_km}</td><td>${zone.max_km}</td><td>${zone.description}</td></tr>`).join('')}
+                    </tbody></table></div>
+                </div>
+                <div class="space-y-8">
+                    ${runKeys.map(key => {
+                        const run = projectData.runs[key];
+                        if (!run) return '';
+                        return `
+                        <div class="bg-white p-6 rounded-lg shadow-md">
+                            ${generateRunHTML(run, isAmpaulo)}
+                        </div>`;
+                    }).join('')}
+                </div>`;
+            return html;
+        }
+
+        function initProgDistanciaView() {
+            const container = document.getElementById('prog-distancia');
+            const data = projectData.progDistancia;
+            const today = new Date();
+            const currentMonth = today.getMonth(); 
+            const currentYear = today.getFullYear();
+            
+            // Removed "🤖 Virtual Running Coach" and "⚙️ Settings" from here
+            // Removed "📋 Current Pace Zones" from here
+
+            const goalsHtml = `
+                <div class="bg-white p-8 rounded-lg shadow-md">
+                    <h2 class="text-3xl font-bold text-teal-700 mb-2 text-center">${data.title}</h2>
+                    <p class="text-slate-600 mb-8 text-center max-w-3xl mx-auto">${data.description}</p>
+                    <div id="month-goal-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        ${data.goals.map(goal => {
+                            const targetDate = getLastSaturday(goal.year, goal.month -1); // Adjust month to be 0-indexed for Date object
+                            const isCurrentMonth = goal.month === currentMonth +1 && goal.year === currentYear; // Adjust month for comparison
+                            return `
+                            <div class="goal-card ${isCurrentMonth ? 'current-month' : ''} bg-slate-50 p-6 rounded-lg text-center cursor-pointer transition-transform hover:scale-105"
+                                 data-month="${goal.month}" data-year="${goal.year}" data-distance="${goal.distance}" data-label="${goal.label}">
+                                <h3 class="text-2xl font-bold text-teal-800">${goal.label.toUpperCase()} ${goal.year}</h3>
+                                <p class="text-5xl font-bold text-green-600 my-3">${goal.distance}<span class="text-2xl font-medium">km</span></p>
+                                <p class="text-slate-600 font-semibold">Corrida Alvo: ${targetDate.toLocaleDateString('pt-BR')}</p>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                    <div id="goal-calendar-container" class="mt-12"></div>
+                </div>`;
+
+            container.innerHTML = goalsHtml + `<div id="weekly-training-plan" class="space-y-6 mt-6"></div>`; // Move weekly-training-plan to be after goals
+            
+            // Removed event listeners for 'generate-weekly-plan-btn', 'update-week-btn', and 'week-selector'
+            // because the associated elements have been removed.
+            
+            // Added logic to manage the 'current-month' class on clicks
+            container.querySelectorAll('.goal-card').forEach(card => card.addEventListener('click', e => {
+                // Remove 'current-month' from all cards first
+                document.querySelectorAll('.goal-card').forEach(c => c.classList.remove('current-month'));
+                // Add 'current-month' only to the clicked card
+                e.currentTarget.classList.add('current-month');
+
+                const { month, year, distance, label } = e.currentTarget.dataset;
+                showGoalMonthCalendar(parseInt(month), parseInt(year), parseInt(distance), label);
+            }));
+
+            // This listener is for calendar days within the "Progressão" tab
+            container.addEventListener('click', e => {
+                const runDayCard = e.target.closest('.run-day');
+                const activityDayCard = e.target.closest('.calendar-day-with-activity'); // For other activities
+                if (runDayCard || activityDayCard) {
+                    showActivityModal(e.target.closest('button')); // Pass the clicked button element
+                }
+            });
+            lucide.createIcons();
+            // Call generateWeeklyTrainingPlan here to ensure the section is populated when the tab is opened
+            generateWeeklyTrainingPlan();
+        }
+
+        // Displays the calendar for a goal month
+        function showGoalMonthCalendar(month, year, distance, label) {
+            const container = document.getElementById('goal-calendar-container');
+            const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0 = Sunday, 6 = Saturday
+            const daysInMonth = new Date(year, month + 1, 0).getDate(); // Last day of the month
+
+            let calendarHtml = `<div class="bg-slate-50 p-6 rounded-lg shadow-inner border animate-fadeIn">
+                <h3 class="text-2xl font-bold text-center text-slate-800 mb-6">Plano de Corrida: ${label} ${year}</h3>
+                <div class="grid grid-cols-7 gap-2 text-center font-semibold text-slate-600 mb-2">
+                    ${["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map(d => `<div>${d}</div>`).join('')}
+                </div>
+                <div class="grid grid-cols-7 gap-2">`;
+            
+            // Add empty divs to fill days before the 1st of the month
+            for (let i = 0; i < firstDayOfMonth; i++) {
+                calendarHtml += '<div></div>';
+            }
+
+            for (let day = 1; day <= daysInMonth; day++) {
+                const date = new Date(year, month, day);
+                const weekdayIndex = date.getDay(); // Day of the week (0=Sun, 6=Sat)
+                const today = new Date();
+                const isToday = today.getFullYear() === year && today.getMonth() === month && day === today.getDate();
+
+                let dayClass = isToday ? 'bg-teal-500 text-white' : 'bg-slate-100';
+                let trainingInfo = '', dataAttributes = '';
+
+                const dateKey = `${year}-${month}`;
+                let specificRunKey = null; // Key for Ampaulo runs from monthly schedule
+                let generalActivity = projectData.calendarActivities[weekdayIndex] || null; // General activity for the weekday
+
+                // 1. Check for specific Ampaulo run
+                if (projectData.monthlyRunSchedules[dateKey] && projectData.monthlyRunSchedules[dateKey][day]) {
+                    specificRunKey = projectData.monthlyRunSchedules[dateKey][day];
+                }
+
+                if (specificRunKey) { // It's an Ampaulo run
+                    const targetDistanceForSelectedMonth = getTargetLongaoDistanceForMonth(month, year);
+                    const initialLongaoBaseDistance = projectData.virtualCoach.trainingTypes.longao.baseDistance;
+                    const scalingFactorForSelectedMonth = targetDistanceForSelectedMonth / initialLongaoBaseDistance;
+
+                    const originalType = projectData.virtualCoach.trainingTypes[specificRunKey.replace('ampaulo_', '')];
+                    let runForCalendarDisplay;
+
+                    if (specificRunKey === 'ampaulo_longao') {
+                        const longRunScaledStructure = generateLongaoStructure(targetDistanceForSelectedMonth);
+                        const longRunTotalDistance = longRunScaledStructure.reduce((sum, phase) => sum + phase.distance, 0);
+                        runForCalendarDisplay = {
+                            title: `🏃‍♂️ Corrida Longa`, 
+                            total: { distance: `${longRunTotalDistance.toFixed(1)} km` }
+                        };
+                    } else {
+                        const scaledTraining = scaleTrainingStructure(originalType, scalingFactorForSelectedMonth);
+                        const totalDistance = scaledTraining.structure.reduce((sum, phase) => sum + phase.distance, 0);
+                        runForCalendarDisplay = {
+                            title: `🏃‍♂️ ${originalType.name.split(': ')[1].replace('Treino ', '').trim()}`, 
+                            total: { distance: `${totalDistance.toFixed(1)} km` }
+                        };
+                    }
+                    
+                    dayClass = 'bg-green-100 border border-green-200 run-day cursor-pointer hover:bg-green-200';
+                    dataAttributes = `data-run-key="${specificRunKey}" data-day="${day}" data-month="${month}" data-year="${year}"`;
+                    
+                    let displayedDistance = '';
+                    if (runForCalendarDisplay.total && runForCalendarDisplay.total.distance) {
+                         displayedDistance = `<span class="text-xs text-teal-600 block font-bold">Meta: ${runForCalendarDisplay.total.distance}</span>`;
+                    }
+                    let displayName = runForCalendarDisplay.title.replace('🏃‍♂️', '').replace('Corrida', '').replace(/\(.+\)/, '').trim();
+                    trainingInfo = `<span class="text-xs text-green-800 font-semibold mt-1 block">${displayName}</span> ${displayedDistance}`;
+                } else if (generalActivity) { // It's a general activity (musculação, Eloisa's run, or rest)
+                    let activityLabel = generalActivity.activity;
+                    let activityIcon = '';
+                    let runOrWorkoutKey = '';
+
+                    if (generalActivity.workoutKey && !generalActivity.runKey) {
+                        activityIcon = '🏋️‍♂️ ';
+                        runOrWorkoutKey = generalActivity.workoutKey;
+                        dataAttributes = `data-workout-key="${runOrWorkoutKey}" data-day="${day}" data-month="${month}" data-year="${year}"`;
+                    } else if (generalActivity.runKey) {
+                        activityIcon = '🏃‍♀️ '; // Assuming Eloisa's run
+                        runOrWorkoutKey = generalActivity.runKey;
+                        dataAttributes = `data-run-key="${runOrWorkoutKey}" data-day="${day}" data-month="${month}" data-year="${year}"`;
+                    } else {
+                        activityIcon = '🧘 '; // Default for rest/active rest
+                        dataAttributes = `data-day="${day}" data-month="${month}" data-year="${year}"`; // For general modal
+                    }
+
+                    // Shorten the activity label if too long for calendar cell
+                    if (activityLabel.includes("MUSCULAÇÃO")) {
+                        activityLabel = "Musculação";
+                    } else if (activityLabel.includes("CORRIDA E MUSCULAÇÃO")) {
+                        activityLabel = "Corrida/Musc.";
+                    } else if (activityLabel.includes("DESCANSO")) {
+                        activityLabel = "Descanso";
+                    }
+
+                    trainingInfo = `<span class="text-xs text-slate-700 font-semibold mt-1 block">${activityIcon}${activityLabel}</span>`;
+                    dayClass = 'bg-blue-100 border border-blue-200 calendar-day-with-activity cursor-pointer hover:bg-blue-200';
+                }
+
+
+                calendarHtml += `<button data-day="${day}" data-month="${month}" data-year="${year}" ${dataAttributes} class="calendar-day-btn h-10 flex items-center justify-center rounded-full ${dayClass} hover:bg-teal-200 transition-colors">${day}${trainingInfo}</button>`;
+            }
+            container.innerHTML = calendarHtml + '</div></div>';
+            container.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+            lucide.createIcons(); 
+        }
+
+        function initNutritionView() {
+            const container = document.getElementById('nutricao');
+            const data = projectData.nutrition;
+            const foodIcons = {
+                "Ovo de galinha": "🥚", "Cuscuz de milho cozido": "🌽", "Melão": "🍈", "Café coado (suave)": "☕",
+                "Arroz branco ou integral": "🍚", "Feijão carioca/preto": "🍲", "Legumes e vegetais ao vapor": "🥦",
+                "Salada colorida sem fruta": "🥗", "Peito de frango sem pele cozido": "🍗", "Peito de frango ou carne magra": "🥩"
+            };
+            container.innerHTML = `<div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                <h2 class="text-2xl font-bold text-teal-700 text-center">Plano Alimentar</h2>
+                <p class="text-center text-slate-500 mb-4">por <strong>${data.professional}</strong></p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    ${data.meals.map(meal => `
+                    <div class="bg-slate-50 p-4 rounded-lg border">
+                        <h3 class="font-bold text-lg">${meal.time} - ${meal.name}</h3>
+                        <ul class="mt-2 space-y-2 text-sm">${meal.items.map(food => {
+                            let subsHtml = '';
+                            if (food.substitutes) {
+                                const substitutesList = food.substitutes.split(',').map(s => `<li>${s.trim()}</li>`).join('');
+                                subsHtml = `<br><em class="text-xs text-slate-500">Substituições:</em><ul class="list-disc list-inside text-xs text-slate-500 ml-4">${substitutesList}</ul>`;
+                            }
+                            return `<li><span class="text-2xl">${food.icon || foodIcons[food.item] || '❓'}</span> <span class="font-semibold">${food.item}:</span> ${food.amount}${subsHtml}</li>`;
+                        }).join('')}
+                        </ul>
+                    </div>`).join('')}
+                </div>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                <h3 class="text-xl font-bold mb-4">💧 Minha Meta de Hidratação Semanal</h3>
+                <ul class="list-disc list-inside space-y-2 text-slate-600">
+                    <li>Segunda a Quinta: <strong>4 litros</strong> por dia</li>
+                    <li>Sexta: <strong>3 litros</strong></li>
+                    <li>Sábado: <strong>2 litros</strong></li>
+                    <li>Domingo: <strong>1 litro</strong></li>
+                </ul>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h3 class="text-xl font-bold mb-4">Informações Gerais</h3>
+                <ul class="list-disc list-inside space-y-2 text-slate-600">${data.generalInfo.map(info => `<li>${info}</li>`).join('')}</ul>
+            </div>`;
+            lucide.createIcons(); 
+        }
+
+        function renderRunningGoalsTable() {
+            const goals = projectData.progDistancia.goals;
+            let html = `
+                <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                    <h3 class="text-xl font-bold text-center mb-4">Metas de Progressão de Corrida</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left">
+                            <thead class="bg-slate-800 text-white">
+                                <tr>
+                                    <th class="p-2">Mês/Ano</th>
+                                    <th class="p-2">Distância Alvo (km)</th>
+                                    <th class="p-2">Corrida Alvo</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${goals.map(goal => {
+                                    const targetDate = getLastSaturday(goal.year, goal.month - 1); // Adjust month to be 0-indexed
+                                    return `
+                                        <tr class="border-b odd:bg-slate-50">
+                                            <td class="p-2">${goal.label} ${goal.year}</td>
+                                            <td class="p-2">${goal.distance}</td>
+                                            <td class="p-2">${targetDate.toLocaleDateString('pt-BR')}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            return html;
+        }
+
+        function initProgressView() {
+            const container = document.getElementById('progresso');
+            container.innerHTML = `
+                <h2 class="text-3xl font-bold text-slate-800 mb-4">Acompanhamento do Progresso</h2>
+                ${renderRunningGoalsTable()} <!-- New section for running goals -->
+                <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                    <h3 class="text-xl font-semibold text-center mb-4">Medidas Corporais</h3>
+                    <div class="overflow-x-auto"><table id="progress-table" class="w-full text-sm text-left">
+                        <thead class="bg-slate-800 text-white"><tr>
+                            <th class="p-2">Data</th><th>Peso (kg)</th><th>% Gordura</th><th>M. Gorda (kg)</th><th>M. Magra (kg)</th><th>Cintura (cm)</th><th>Abdômen (cm)</th>
+                        </tr></thead><tbody></tbody>
+                    </table></div>
+                    <div class="text-center mt-6"><button id="generate-charts-btn" class="bg-teal-600 text-white font-semibold py-2 px-4 rounded-lg">Gerar Gráficos de Medidas</button></div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-white p-6 rounded-lg shadow-md"><h3 class="text-xl font-semibold text-center mb-4">Peso e % de Gordura</h3><div class="chart-container"><canvas id="weightFatChart"></canvas></div></div>
+                    <div class="bg-white p-6 rounded-lg shadow-md"><h3 class="text-xl font-semibold text-center mb-4">Composição Corporal</h3><div class="chart-container"><canvas id="bodyCompositionChart"></canvas></div></div>
+                </div>`;
+            renderProgressTable();
+            document.getElementById('generate-charts-btn').addEventListener('click', initCharts);
+            lucide.createIcons();
+        }
+
+        function renderProgressTable() {
+            const tableBody = document.getElementById('progress-table')?.querySelector('tbody');
+            if(!tableBody) return;
+            tableBody.innerHTML = projectData.progress.dates.map((date, i) => `
+                <tr class="border-b odd:bg-slate-50">
+                    <td class="p-2">${date}</td><td>${projectData.progress.weight[i]}</td><td>${projectData.progress.fatPercentage[i]}</td>
+                    <td>${projectData.progress.fatMass[i]}</td><td>${projectData.progress.leanMass[i]}</td>
+                    <td>${projectData.progress.waist[i]}</td><td>${projectData.progress.abdomen[i]}</td>
+                </tr>`).join('');
+        }
+
+        function initCharts() {
+            if (window.weightFatChartInstance) window.weightFatChartInstance.destroy();
+            if (window.bodyCompositionChartInstance) window.bodyCompositionChartInstance.destroy();
+            
+            const pData = projectData.progress;
+            const commonOptions = { responsive: true, maintainAspectRatio: false };
+            
+            const weightCtx = document.getElementById('weightFatChart');
+            if (weightCtx) {
+                window.weightFatChartInstance = new Chart(weightCtx.getContext('2d'), { 
+                    type: 'line', 
+                    data: { 
+                        labels: pData.dates, 
+                        datasets: [
+                            { label: 'Peso (kg)', data: pData.weight, borderColor: '#0d9488', yAxisID: 'y', fill: false, tension: 0.1 }, 
+                            { label: '% de Gordura', data: pData.fatPercentage, borderColor: '#f97316', yAxisID: 'y1', fill: false, tension: 0.1 }
+                        ] 
+                    }, 
+                    options: { 
+                        ...commonOptions, 
+                        scales: { 
+                            y: { position: 'left', beginAtZero: false }, 
+                            y1: { position: 'right', grid: { drawOnChartArea: false }, beginAtZero: false } 
+                        },
+                        plugins: {
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false
+                            }
+                        }
+                    } 
+                });
+                weightCtx.setAttribute('__chartjs__', 'true'); 
+            }
+
+            const compCtx = document.getElementById('bodyCompositionChart');
+            if (compCtx) {
+                window.bodyCompositionChartInstance = new Chart(compCtx.getContext('2d'), { 
+                    type: 'bar', 
+                    data: { 
+                        labels: pData.dates, 
+                        datasets: [
+                            { label: 'Massa Gorda (kg)', data: pData.fatMass, backgroundColor: '#f97316' }, 
+                            { label: 'Massa Magra (kg)', data: pData.leanMass, backgroundColor: '#0d9488' }
+                        ] 
+                    }, 
+                    options: { 
+                        ...commonOptions, 
+                        scales: { 
+                            x: { stacked: true }, 
+                            y: { stacked: true, beginAtZero: true } 
+                        },
+                        plugins: {
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false
+                            }
+                        }
+                    } 
+                });
+                compCtx.setAttribute('__chartjs__', 'true');
+            }
+        }
+
+        function initCalendarView() {
+            const container = document.getElementById('calendario');
+            const today = new Date();
+            let html = `<h2 class="text-2xl font-bold text-slate-800 mb-4">Calendário</h2>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">`;
+            
+            // Loop to generate calendars for the next months (starting from the current month)
+            for (let i = 0; i < (12 - today.getMonth()); i++) { 
+                const date = new Date(today.getFullYear(), today.getMonth() + i, 1);
+                html += generateMonthCalendar(date.getFullYear(), date.getMonth());
+            }
+
+            html += '</div>';
+            container.innerHTML = html;
+
+            // Add event listener for calendar buttons
+            container.querySelectorAll('.calendar-day-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    showActivityModal(e.currentTarget); // Pass the clicked button element
+                })
+            })
+            lucide.createIcons(); 
+        }
+
+        function generateMonthCalendar(year, month) {
+            const monthName = getMonthName(new Date(year, month));
+            const firstDay = new Date(year, month, 1).getDay(); // 0 = Sunday, 6 = Saturday
+            const daysInMonth = new Date(year, month + 1, 0).getDate(); // Last day of the month
+
+            let calendarHtml = `<div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                <h3 class="text-2xl font-bold text-center text-slate-800 mb-6">${monthName} ${year}</h3>
+                <div class="grid grid-cols-7 gap-2 text-center font-semibold text-slate-600 mb-2">
+                    ${["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map(d => `<div>${d}</div>`).join('')}
+                </div>
+                <div class="grid grid-cols-7 gap-2">`;
+            
+            // Add empty divs to fill days before the 1st of the month
+            for (let i = 0; i < firstDay; i++) {
+                calendarHtml += '<div></div>';
+            }
+
+            for (let day = 1; day <= daysInMonth; day++) {
+                const date = new Date(year, month, day);
+                const weekdayIndex = date.getDay(); // Day of the week (0=Sun, 6=Sat)
+                const today = new Date();
+                const isToday = today.getFullYear() === year && today.getMonth() === month && day === today.getDate();
+
+                let dayClass = isToday ? 'bg-teal-500 text-white' : 'bg-slate-100';
+                let activityInfo = '', dataAttributes = '';
+
+                const dateKey = `${year}-${month}`;
+                let specificAmpauloRunKey = null; // Key for Ampaulo runs from monthly schedule
+                let generalActivity = projectData.calendarActivities[weekdayIndex] || null; // General activity for the weekday
+
+                // 1. Check for specific Ampaulo run from the generated monthly schedule
+                if (projectData.monthlyRunSchedules[dateKey] && projectData.monthlyRunSchedules[dateKey][day]) {
+                    specificAmpauloRunKey = projectData.monthlyRunSchedules[dateKey][day];
+                }
+
+                if (specificAmpauloRunKey) { // It's an Ampaulo run
+                    const targetDistanceForSelectedMonth = getTargetLongaoDistanceForMonth(month, year);
+                    const initialLongaoBaseDistance = projectData.virtualCoach.trainingTypes.longao.baseDistance;
+                    const scalingFactorForSelectedMonth = targetDistanceForSelectedMonth / initialLongaoBaseDistance;
+
+                    const originalType = projectData.virtualCoach.trainingTypes[specificAmpauloRunKey.replace('ampaulo_', '')];
+                    let runForCalendarDisplay;
+
+                    if (specificAmpauloRunKey === 'ampaulo_longao') {
+                        const longRunScaledStructure = generateLongaoStructure(targetDistanceForSelectedMonth);
+                        const longRunTotalDistance = longRunScaledStructure.reduce((sum, phase) => sum + phase.distance, 0);
+                        runForCalendarDisplay = {
+                            title: `🏃‍♂️ Corrida Longa`, 
+                            total: { distance: `${longRunTotalDistance.toFixed(1)} km` }
+                        };
+                    } else {
+                        const scaledTraining = scaleTrainingStructure(originalType, scalingFactorForSelectedMonth);
+                        const totalDistance = scaledTraining.structure.reduce((sum, phase) => sum + phase.distance, 0);
+                        runForCalendarDisplay = {
+                            title: `🏃‍♂️ ${originalType.name.split(': ')[1].replace('Treino ', '').trim()}`, 
+                            total: { distance: `${totalDistance.toFixed(1)} km` }
+                        };
+                    }
+                    
+                    dayClass = 'bg-green-100 border border-green-200 cursor-pointer hover:bg-green-200';
+                    dataAttributes = `data-run-key="${specificAmpauloRunKey}" data-day="${day}" data-month="${month}" data-year="${year}"`;
+                    
+                    let displayedDistance = '';
+                    if (runForCalendarDisplay.total && runForCalendarDisplay.total.distance) {
+                         displayedDistance = `<span class="text-xs text-teal-600 block font-bold">Meta: ${runForCalendarDisplay.total.distance}</span>`;
+                    }
+                    let displayName = runForCalendarDisplay.title.replace('🏃‍♂️', '').replace('Corrida', '').replace(/\(.+\)/, '').trim();
+                    activityInfo = `<span class="text-xs text-green-800 font-semibold mt-1 block">${displayName}</span> ${displayedDistance}`;
+                } else if (generalActivity) { // It's a general activity (musculação, Eloisa's run, or rest)
+                    let activityLabel = generalActivity.activity;
+                    let activityIcon = '';
+                    let activityKey = ''; // Use a generic key for modal lookup
+
+                    if (generalActivity.workoutKey && !generalActivity.runKey) {
+                        activityIcon = '🏋️‍♂️ ';
+                        activityKey = generalActivity.workoutKey;
+                        dataAttributes = `data-workout-key="${activityKey}" data-day="${day}" data-month="${month}" data-year="${year}"`;
+                    } else if (generalActivity.runKey) {
+                        activityIcon = '🏃‍♀️ '; // Assuming Eloisa's run
+                        activityKey = generalActivity.runKey;
+                        dataAttributes = `data-run-key="${activityKey}" data-day="${day}" data-month="${month}" data-year="${year}"`;
+                    } else {
+                        activityIcon = '🧘 '; // Default for rest/active rest
+                        activityKey = `general_activity_${weekdayIndex}`; // A generic key to indicate general activity
+                        dataAttributes = `data-day="${day}" data-month="${month}" data-year="${year}"`; // For general modal
+                    }
+
+                    // Shorten the activity label if too long for calendar cell
+                    if (activityLabel.includes("MUSCULAÇÃO") && activityLabel.includes("E CORRIDA")) {
+                        activityLabel = "Musc./Corr.";
+                    } else if (activityLabel.includes("MUSCULAÇÃO")) {
+                        activityLabel = "Musculação";
+                    } else if (activityLabel.includes("CORRIDA E MUSCULAÇÃO")) {
+                        activityLabel = "Corrida/Musc.";
+                    } else if (activityLabel.includes("DESCANSO")) {
+                        activityLabel = "Descanso";
+                    }
+
+                    activityInfo = `<span class="text-xs text-slate-700 font-semibold mt-1 block">${activityIcon}${activityLabel}</span>`;
+                    dayClass = 'bg-blue-100 border border-blue-200 cursor-pointer hover:bg-blue-200';
+                }
+
+
+                calendarHtml += `<button data-day="${day}" data-month="${month}" data-year="${year}" ${dataAttributes} class="calendar-day-btn h-10 flex flex-col items-center justify-center rounded-full ${dayClass} hover:bg-teal-200 transition-colors">${day}${activityInfo}</button>`;
+            }
+            calendarHtml += '</div></div>';
+            return calendarHtml;
+        }
+
+        function initFinancesView() {
+            const container = document.getElementById('financas');
+            container.innerHTML = `<div class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-2xl font-bold text-center mb-6">Suas Finanças</h2>
+                <div class="space-y-8">
+                    <div><h3 class="text-xl font-semibold mb-4 border-b pb-2">💸 Contas a Pagar</h3><div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-slate-800 text-white"><tr><th class="p-2 text-left">Obrigação</th><th class="p-2 text-left">Dia do Vencimento</th></tr></thead>
+                            <tbody>${projectData.finances.billPayments.map(bill => `<tr class="border-b odd:bg-slate-50"><td class="p-2">${bill.name}</td><td class="p-2">${bill.day}</td></tr>`).join('')}</tbody>
+                        </table></div></div>
+                    <div><h3 class="text-xl font-semibold mb-4 border-b pb-2">💳 Cartões de Crédito</h3><div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-slate-800 text-white"><tr><th class="p-2 text-left">Cartão</th><th class="p-2 text-left">Vencimento</th><th class="p-2 text-left">Fechamento</th></tr></thead>
+                            <tbody>${projectData.finances.creditCardInfo.map(card => `<tr class="border-b odd:bg-slate-50"><td class="p-2">${card.name}</td><td class="p-2">Dia ${card.maturityDay}</td><td class="p-2">Dia ${card.closingDay}</td></tr>`).join('')}</tbody>
+                        </table></div></div>
+                </div></div>`;
+            lucide.createIcons(); 
+        }
+
+        // --- Modal Functions (UNIFIED) ---
+
+        // Unified function to display activity details in the modal
+        function showActivityModal(clickedElement) {
+            const day = parseInt(clickedElement.dataset.day);
+            const month = parseInt(clickedElement.dataset.month);
+            const year = parseInt(clickedElement.dataset.year);
+            const date = new Date(year, month, day);
+            const weekdayIndex = date.getDay();
+
+            const modal = document.getElementById('calendar-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalActivity = document.getElementById('modal-activity');
+            const modalMotivation = document.getElementById('modal-motivation');
+            const modalVerseRef = document.getElementById('modal-verse-ref');
+            const modalFinances = document.getElementById('modal-finances');
+
+            modalTitle.textContent = `${getDayName(date)}, ${day} de ${getMonthName(date)}`;
+            modalMotivation.textContent = '';
+            modalVerseRef.textContent = '';
+            modalFinances.innerHTML = '';
+            modalActivity.innerHTML = ''; // Clear previous content
+
+            const runKey = clickedElement.dataset.runKey;
+            const workoutKey = clickedElement.dataset.workoutKey;
+            
+            if (runKey) { // Display Running Training
+                const isAmpauloRun = runKey.startsWith('ampaulo_'); 
+                let runToDisplay;
+
+                if (isAmpauloRun) {
+                    const targetDistanceForSelectedMonth = getTargetLongaoDistanceForMonth(month, year);
+                    const originalTypeKey = runKey.replace('ampaulo_', ''); 
+                    const originalTrainingType = projectData.virtualCoach.trainingTypes[originalTypeKey];
+                    let scaledStructure;
+
+                    if (originalTypeKey === 'longao') {
+                        scaledStructure = generateLongaoStructure(targetDistanceForSelectedMonth);
+                    } else {
+                        const initialLongaoBaseDistance = projectData.virtualCoach.trainingTypes.longao.baseDistance;
+                        const scalingFactor = targetDistanceForSelectedMonth / initialLongaoBaseDistance;
+                        scaledStructure = scaleTrainingStructure(originalTrainingType, scalingFactor).structure;
+                    }
+
+                    const totalDistance = scaledStructure.reduce((sum, phase) => {
+                        const distValue = parseFloat(phase.distance);
+                        return sum + (isNaN(distValue) ? 0 : distValue);
+                    }, 0);
+                    const totalTimeSeconds = scaledStructure.reduce((sum, phase) => {
+                        const timeStr = calculateEstimatedTime(phase.distance, phase.zone);
+                        const [min, sec] = timeStr.split(':').map(Number);
+                        return sum + (min * 60) + sec;
+                    }, 0);
+                    const totalMinutes = Math.floor(totalTimeSeconds / 60);
+                    const totalSecondsRemainder = Math.round(totalTimeSeconds % 60);
+
+                    runToDisplay = {
+                        key: runKey,
+                        title: `🏃‍♂️ ${originalTrainingType.name.split(': ')[1]} (${getMonthName(date)} - Escalada)`,
+                        objective: originalTrainingType.description,
+                        total: { duration: `${totalMinutes} min ${totalSecondsRemainder.toString().padStart(2, '0')} sec`, distance: `${totalDistance.toFixed(1)} km` },
+                        stages: scaledStructure.map(phase => ({
+                            km: (typeof phase.distance === 'number')
+                                ? (phase.distance === Math.floor(phase.distance) ? String(phase.distance) : phase.distance.toFixed(1))
+                                : String(phase.phase),
+                            name: phase.description,
+                            pace: `${projectData.runs.paceDefinitionsAmpaulo.find(def => def.name.startsWith(phase.zone)).min_km}-${projectData.runs.paceDefinitionsAmpaulo.find(def => def.name.startsWith(phase.zone)).max_km}`,
+                            zone: phase.zone,
+                            estimated_time: calculateEstimatedTime(phase.distance, phase.zone)
+                        }))
+                    };
+
+                    if (originalTypeKey === 'longao') {
+                        runToDisplay.title = `🏃‍♂️ Corrida Longa (${getMonthName(date)} - Meta ${targetDistanceForSelectedMonth}km)`;
+                    }
+
+                } else {
+                    runToDisplay = projectData.runs[runKey];
+                }
+
+                if (runToDisplay) {
+                    modalActivity.innerHTML = `<strong>Tipo:</strong> Corrida<br>${generateRunHTML(runToDisplay, isAmpauloRun)}`;
+                } else {
+                    modalActivity.innerHTML = 'Nenhum plano de corrida encontrado para este dia.';
+                }
+            } else if (workoutKey) { // Display Gym Workout
+                const workout = projectData.workouts[workoutKey];
+                if (workout) {
+                    modalActivity.innerHTML = `<strong>Tipo:</strong> Musculação<br>${generateWorkoutHTML(workout, true)}`;
+                } else {
+                    modalActivity.innerHTML = 'Nenhum treino de musculação encontrado para este dia.';
+                }
+            } else { // Display General Activity or Rest Day
+                const dayData = projectData.calendarActivities[weekdayIndex] || { msg: "Dia de descanso.", verse: "" };
+                modalActivity.innerHTML = `<strong>Atividade:</strong> ${dayData.activity || 'Dia de Descanso'}`;
+                modalMotivation.textContent = dayData.msg || '';
+                modalVerseRef.textContent = dayData.verse ? `"${dayData.verse}"` : "";
+            }
+
+            // Always display financial obligations if any for the day
+            const obligations = projectData.finances.billPayments.filter(b => b.day == day);
+            if(obligations.length > 0) {
+                modalFinances.innerHTML = `<h4 class="font-semibold text-slate-700 mt-4 border-t pt-4">Obrigações Financeiras:</h4><ul class="list-disc list-inside text-red-600">${obligations.map(o => `<li>${o.name}</li>`).join('')}</ul>`;
+            } else {
+                modalFinances.innerHTML = `<p class="text-slate-500 mt-4 border-t pt-4">Nenhuma obrigação financeira para este dia.</p>`;
+            }
+            
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            lucide.createIcons(); // Re-create icons for new modal content
+        }
+    </script>
+</body>
+</html>
